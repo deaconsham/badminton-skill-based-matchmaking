@@ -1,2 +1,3 @@
-# Badminton-Skill-Based-Matchmaking
-Skill based matchmaking for doubles club badminton with Microsoft TrueSkill.
+# badminton-skill-based-matchmaking
+
+skill based matchmaking for doubles club badminton with microsoft trueskill.
