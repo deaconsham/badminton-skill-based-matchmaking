@@ -1,0 +1,6 @@
+node_modules
+.venv/
+__pycache__/
+serviceAccountKey.json
+.env
+badminton-matchmaking-9b69f-firebase-adminsdk-fbsvc-cceede915a.json
