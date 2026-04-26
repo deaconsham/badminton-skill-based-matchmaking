@@ -6,20 +6,13 @@ import { Plus, Loader2 } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { collection, addDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
-import { STARTING_MU } from '../lib/constants'
+import { TIERS, TIER_BG, STARTING_MU } from '../lib/constants'
 import { useToast } from './ui/ToastProvider'
-
-const TIERS = [
-  { id: 'Green', label: 'BEGINNER', dot: 'bg-skill-green' },
-  { id: 'Yellow', label: 'INTERMEDIATE', dot: 'bg-skill-yellow' },
-  { id: 'Orange', label: 'ADVANCED', dot: 'bg-skill-orange' },
-  { id: 'Red', label: 'SKILLED', dot: 'bg-skill-red' },
-]
 
 export function Register() {
   const { showToast } = useToast()
   const [name, setName] = useState('')
-  const [selectedTier, setSelectedTier] = useState('Green')
+  const [selectedTier, setSelectedTier] = useState('Beginner')
   const [submitting, setSubmitting] = useState(false)
 
   const handleSubmit = async () => {
@@ -40,7 +33,7 @@ export function Register() {
       })
       showToast(`${trimmed} added to roster`, 'success')
       setName('')
-      setSelectedTier('Green')
+      setSelectedTier('Beginner')
     } catch (err) {
       console.error('Failed to register player:', err)
       showToast('Failed to add player', 'warning')
@@ -67,17 +60,17 @@ export function Register() {
         <div className="grid grid-cols-2 gap-3">
           {TIERS.map((tier) => (
             <button
-              key={tier.id}
-              onClick={() => setSelectedTier(tier.id)}
+              key={tier}
+              onClick={() => setSelectedTier(tier)}
               className={cn(
-                "flex items-center justify-center gap-2 h-10 rounded-sm text-[11px] font-bold tracking-wider transition-colors",
-                selectedTier === tier.id
-                  ? "bg-surface-highest text-on-surface shadow-sm"
-                  : "bg-surface-low text-on-surface-variant hover:bg-surface-highest/50"
+                'flex items-center justify-center gap-2 h-10 rounded-sm text-[11px] font-bold tracking-wider transition-colors',
+                selectedTier === tier
+                  ? 'bg-surface-highest text-on-surface shadow-sm'
+                  : 'bg-surface-low text-on-surface-variant hover:bg-surface-highest/50'
               )}
             >
-              <span className={cn("w-1.5 h-1.5 rounded-full", tier.dot)} />
-              {tier.label}
+              <span className={cn('w-1.5 h-1.5 rounded-full', TIER_BG[tier])} />
+              {tier.toUpperCase()}
             </button>
           ))}
         </div>

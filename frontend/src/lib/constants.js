@@ -1,17 +1,31 @@
+export const TIERS = ['Beginner', 'Intermediate', 'Advanced', 'Elite']
+
+export const TIER_BG = {
+  Beginner:     'bg-skill-beginner',
+  Intermediate: 'bg-skill-intermediate',
+  Advanced:     'bg-skill-advanced',
+  Elite:        'bg-skill-elite',
+}
+
+export const TIER_COLOUR = {
+  Beginner:     '#ef4444',
+  Intermediate: '#3b82f6',
+  Advanced:     '#14b8a6',
+  Elite:        '#10b981',
+}
+
 export const RATING_RANGES = {
-  Green: [0, 999],
-  Yellow: [1000, 1499],
-  Orange: [1500, 1999],
-  Red: [2000, 9999],
+  Beginner:     [0,    999],
+  Intermediate: [1000, 1499],
+  Advanced:     [1500, 1999],
+  Elite:        [2000, 9999],
 }
 
 export const STARTING_MU = {
-  Green: 15.0,
-  Yellow: 25.0,
-  Orange: 35.0,
-  Red: 45.0,
+  Beginner:     15.0,
+  Intermediate: 25.0,
+  Advanced:     35.0,
+  Elite:        45.0,
 }
-
-export const SIGMA_CONFIDENCE_THRESHOLD = 6.0
 
 export const computeRating = (mu) => Math.max(0, Math.min(9999, Math.round(mu * 50)))

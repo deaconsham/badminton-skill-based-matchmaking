@@ -4,22 +4,8 @@ import { X, Trash2, AlertTriangle } from 'lucide-react'
 import { doc, deleteDoc, updateDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { cn } from '../lib/utils'
-import { SIGMA_CONFIDENCE_THRESHOLD } from '../lib/constants'
+import { TIER_BG, TIER_COLOUR, TIERS } from '../lib/constants'
 import { useToast } from './ui/ToastProvider'
-
-const tierColours = {
-  Green: 'bg-skill-green',
-  Yellow: 'bg-skill-yellow',
-  Orange: 'bg-skill-orange',
-  Red: 'bg-skill-red',
-}
-
-const tierLabels = {
-  Green: 'Beginner',
-  Yellow: 'Intermediate',
-  Orange: 'Advanced',
-  Red: 'Skilled',
-}
 
 export function PlayerModel({ player, allPlayers, queue, queueSet, onClose }) {
   const { showToast } = useToast()
@@ -32,25 +18,79 @@ export function PlayerModel({ player, allPlayers, queue, queueSet, onClose }) {
   const isCheckedIn = queueSet.has(player.id)
   const queueEntry = queue.find((q) => q.playerId === player.id)
   const rank = allPlayers.findIndex((p) => p.id === player.id) + 1
-  const isCalibrating = player.sigma > SIGMA_CONFIDENCE_THRESHOLD
-  const confidencePercent = Math.max(0, Math.min(100, Math.round((1 - player.sigma / 8.333) * 100)))
+  const tierColour = TIER_COLOUR[player.tier] || '#5a6061'
 
+  // Other checked-in players (excluding this one) for request dropdowns
   const checkedInPlayers = queue
     .filter((q) => q.playerId !== player.id)
     .map((q) => {
       const p = allPlayers.find((pl) => pl.id === q.playerId)
-      return p ? { id: p.id, name: p.name, queueDocId: q.queueDocId } : null
+      return p ? { id: p.id, name: p.name } : null
     })
     .filter(Boolean)
+
+  // Map Firestore field name → camelCase key on queueEntry
+  const FIELD_KEY = {
+    requested_teammate:  'requestedTeammate',
+    requested_opponent1: 'requestedOpponent1',
+    requested_opponent2: 'requestedOpponent2',
+  }
 
   const handleRequestChange = async (field, value) => {
     if (!queueEntry) return
     setSaving(true)
     try {
-      await updateDoc(doc(db, 'queue', queueEntry.queueDocId), {
-        [field]: value || null,
-      })
-      showToast('Match request updated', 'success')
+      const newValue  = value || null
+      const prevValue = queueEntry[FIELD_KEY[field]] || null
+
+      // --- 1. Update the current player ---
+      const myRef = doc(db, 'queue', queueEntry.queueDocId)
+      await updateDoc(myRef, { [field]: newValue })
+
+      // --- 2. Clear the OLD target's reverse link ---
+      if (prevValue && prevValue !== newValue) {
+        const prevEntry = queue.find((q) => q.playerId === prevValue)
+        if (prevEntry) {
+          const clear = {}
+          if (field === 'requested_teammate') {
+            if (prevEntry.requestedTeammate === player.id) clear.requested_teammate = null
+          } else {
+            // opponent slot — clear whichever slot points back at this player
+            if (prevEntry.requestedOpponent1 === player.id) clear.requested_opponent1 = null
+            if (prevEntry.requestedOpponent2 === player.id) clear.requested_opponent2 = null
+          }
+          if (Object.keys(clear).length)
+            await updateDoc(doc(db, 'queue', prevEntry.queueDocId), clear)
+        }
+      }
+
+      // --- 3. Set the NEW target's reverse link ---
+      if (newValue) {
+        const newEntry = queue.find((q) => q.playerId === newValue)
+        if (newEntry) {
+          if (field === 'requested_teammate') {
+            // Always mirror partner (overwrite if they had someone else)
+            await updateDoc(doc(db, 'queue', newEntry.queueDocId), {
+              requested_teammate: player.id,
+            })
+          } else {
+            // Opponent: fill first free slot (skip if already linked)
+            const alreadyLinked =
+              newEntry.requestedOpponent1 === player.id ||
+              newEntry.requestedOpponent2 === player.id
+            if (!alreadyLinked) {
+              if (!newEntry.requestedOpponent1) {
+                await updateDoc(doc(db, 'queue', newEntry.queueDocId), { requested_opponent1: player.id })
+              } else if (!newEntry.requestedOpponent2) {
+                await updateDoc(doc(db, 'queue', newEntry.queueDocId), { requested_opponent2: player.id })
+              }
+              // else both slots taken — skip silently
+            }
+          }
+        }
+      }
+
+      showToast('Request updated', 'success')
     } catch (err) {
       console.error('Failed to update request:', err)
       showToast('Failed to update request', 'warning')
@@ -61,9 +101,7 @@ export function PlayerModel({ player, allPlayers, queue, queueSet, onClose }) {
   const handleDelete = async () => {
     setDeleting(true)
     try {
-      if (queueEntry) {
-        await deleteDoc(doc(db, 'queue', queueEntry.queueDocId))
-      }
+      if (queueEntry) await deleteDoc(doc(db, 'queue', queueEntry.queueDocId))
       await deleteDoc(doc(db, 'players', player.id))
       showToast(`${player.name} removed from roster`, 'info')
       onClose()
@@ -91,14 +129,22 @@ export function PlayerModel({ player, allPlayers, queue, queueSet, onClose }) {
           className="bg-surface-lowest rounded-lg shadow-xl w-full max-w-md overflow-hidden"
           onClick={(e) => e.stopPropagation()}
         >
+          {/* Header */}
           <div className="p-6 pb-0 flex items-start justify-between">
             <div className="flex items-center gap-3">
-              <span className={cn('w-3 h-3 rounded-full', tierColours[player.tier])} />
+              <span className={cn('w-3 h-3 rounded-full flex-shrink-0', TIER_BG[player.tier])} />
               <div>
                 <h2 className="text-xl font-bold">{player.name}</h2>
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-bold tracking-widest uppercase text-on-surface-variant">
-                    {tierLabels[player.tier]} · {rank} of {allPlayers.length}
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span
+                    className="text-[11px] font-bold tracking-widest uppercase"
+                    style={{ color: tierColour }}
+                  >
+                    {player.tier}
+                  </span>
+                  <span className="text-on-surface-variant/40 text-[11px]">·</span>
+                  <span className="text-[11px] font-medium text-on-surface-variant">
+                    #{rank} of {allPlayers.length}
                   </span>
                 </div>
               </div>
@@ -112,118 +158,96 @@ export function PlayerModel({ player, allPlayers, queue, queueSet, onClose }) {
           </div>
 
           <div className="p-6 flex flex-col gap-5">
-            <div className="grid grid-cols-3 gap-3">
-              <StatBox label="Rating" value={player.rating} />
-              <StatBox label="μ (Mu)" value={player.mu.toFixed(2)} />
-              <StatBox label="σ (Sigma)" value={player.sigma.toFixed(2)} />
-            </div>
-
+            {/* Stats */}
             <div className="grid grid-cols-2 gap-3">
+              <StatBox label="Rating" value={player.rating} />
               <StatBox label="Games Played" value={player.gamesPlayed} />
-              <div className="bg-surface-low rounded-md p-3 flex flex-col gap-1.5">
-                <span className="text-[9px] font-bold tracking-widest uppercase text-on-surface-variant">
-                  Confidence
-                </span>
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 h-1.5 bg-surface-highest rounded-full overflow-hidden">
-                    <div
-                      className={cn(
-                        'h-full rounded-full transition-all duration-700',
-                        isCalibrating ? 'bg-skill-orange' : 'bg-skill-green'
-                      )}
-                      style={{ width: `${confidencePercent}%` }}
-                    />
-                  </div>
-                  <span className="text-[11px] font-mono font-bold">
-                    {confidencePercent}%
-                  </span>
-                </div>
-              </div>
             </div>
 
+            {/* Match Requests — only shown when checked in */}
             {isCheckedIn && (
               <div className="flex flex-col gap-3">
                 <span className="text-[10px] font-bold tracking-widest uppercase text-on-surface-variant">
                   Match Requests
                 </span>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[8px] font-bold tracking-widest text-secondary uppercase opacity-70">
-                      Partner
+
+                {/* Partner (1 player) */}
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-skill-advanced flex-shrink-0" />
+                    <label className="text-[8px] font-bold tracking-widest uppercase" style={{ color: '#14b8a6' }}>
+                      Partner <span className="opacity-60 font-normal normal-case">(1 player)</span>
                     </label>
-                    <select
-                      disabled={saving}
-                      value={queueEntry?.requestedTeammate || ''}
-                      onChange={(e) => handleRequestChange('requested_teammate', e.target.value)}
-                      className="h-9 rounded-sm bg-surface-low px-2 text-[11px] font-medium text-on-surface focus:outline-none focus:ring-1 focus:ring-secondary/30 transition-all cursor-pointer truncate"
-                    >
-                      <option value="">None</option>
-                      {checkedInPlayers
-                        .filter(p => p.id !== (queueEntry?.requestedOpponent1) && p.id !== (queueEntry?.requestedOpponent2))
-                        .map((p) => (
-                          <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
-                    </select>
                   </div>
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[8px] font-bold tracking-widest text-skill-orange uppercase opacity-70">
-                      Opponent 1
+                  <select
+                    disabled={saving}
+                    value={queueEntry?.requestedTeammate || ''}
+                    onChange={(e) => handleRequestChange('requested_teammate', e.target.value)}
+                    className="h-9 rounded-sm bg-surface-low px-2 text-[11px] font-medium text-on-surface focus:outline-none focus:ring-1 focus:ring-skill-advanced/30 transition-all cursor-pointer"
+                  >
+                    <option value="">None</option>
+                    {checkedInPlayers
+                      .filter((p) => p.id !== queueEntry?.requestedOpponent1 && p.id !== queueEntry?.requestedOpponent2)
+                      .map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+
+                {/* Opponents (up to 2 players) */}
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-skill-beginner flex-shrink-0" />
+                    <label className="text-[8px] font-bold tracking-widest uppercase" style={{ color: '#ef4444' }}>
+                      Opponents <span className="opacity-60 font-normal normal-case">(up to 2)</span>
                     </label>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
                     <select
                       disabled={saving}
                       value={queueEntry?.requestedOpponent1 || ''}
                       onChange={(e) => handleRequestChange('requested_opponent1', e.target.value)}
-                      className="h-9 rounded-sm bg-surface-low px-2 text-[11px] font-medium text-on-surface focus:outline-none focus:ring-1 focus:ring-skill-orange/30 transition-all cursor-pointer truncate"
+                      className="h-9 rounded-sm bg-surface-low px-2 text-[11px] font-medium text-on-surface focus:outline-none focus:ring-1 focus:ring-skill-beginner/30 transition-all cursor-pointer"
                     >
                       <option value="">None</option>
                       {checkedInPlayers
-                        .filter(p => p.id !== (queueEntry?.requestedTeammate) && p.id !== (queueEntry?.requestedOpponent2))
-                        .map((p) => (
-                          <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
+                        .filter((p) => p.id !== queueEntry?.requestedTeammate && p.id !== queueEntry?.requestedOpponent2)
+                        .map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[8px] font-bold tracking-widest text-skill-orange uppercase opacity-70">
-                      Opponent 2
-                    </label>
                     <select
                       disabled={saving}
                       value={queueEntry?.requestedOpponent2 || ''}
                       onChange={(e) => handleRequestChange('requested_opponent2', e.target.value)}
-                      className="h-9 rounded-sm bg-surface-low px-2 text-[11px] font-medium text-on-surface focus:outline-none focus:ring-1 focus:ring-skill-orange/30 transition-all cursor-pointer truncate"
+                      className="h-9 rounded-sm bg-surface-low px-2 text-[11px] font-medium text-on-surface focus:outline-none focus:ring-1 focus:ring-skill-beginner/30 transition-all cursor-pointer"
                     >
                       <option value="">None</option>
                       {checkedInPlayers
-                        .filter(p => p.id !== (queueEntry?.requestedTeammate) && p.id !== (queueEntry?.requestedOpponent1))
-                        .map((p) => (
-                          <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
+                        .filter((p) => p.id !== queueEntry?.requestedTeammate && p.id !== queueEntry?.requestedOpponent1)
+                        .map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
                   </div>
                 </div>
               </div>
             )}
 
+            {/* Delete */}
             <div className="border-t border-outline-variant pt-4">
               {!confirmDelete ? (
                 <button
                   onClick={() => setConfirmDelete(true)}
-                  className="flex items-center gap-2 text-[11px] font-bold tracking-wider uppercase text-skill-red hover:bg-skill-red/10 px-3 py-2 rounded-sm transition-colors"
+                  className="flex items-center gap-2 text-[11px] font-bold tracking-wider uppercase text-skill-beginner hover:bg-skill-beginner/10 px-3 py-2 rounded-sm transition-colors"
                 >
                   <Trash2 size={14} />
                   Delete Player
                 </button>
               ) : (
                 <div className="flex items-center gap-3">
-                  <AlertTriangle size={16} className="text-skill-red flex-shrink-0" />
+                  <AlertTriangle size={16} className="text-skill-beginner flex-shrink-0" />
                   <span className="text-[12px] font-medium text-on-surface-variant flex-1">
                     Remove {player.name} permanently?
                   </span>
                   <button
                     onClick={handleDelete}
                     disabled={deleting}
-                    className="h-8 px-4 rounded-sm text-[10px] font-bold tracking-wider uppercase bg-skill-red text-on-primary hover:bg-skill-red/90 transition-colors disabled:opacity-50"
+                    className="h-8 px-4 rounded-sm text-[10px] font-bold tracking-wider uppercase bg-skill-beginner text-white hover:bg-skill-beginner/90 transition-colors disabled:opacity-50"
                   >
                     {deleting ? 'Removing...' : 'Confirm'}
                   </button>

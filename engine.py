@@ -1,5 +1,6 @@
 import time
 import itertools
+import traceback
 import firebase_admin
 from firebase_admin import credentials, firestore
 import trueskill
@@ -11,504 +12,368 @@ db = firestore.client()
 env = trueskill.TrueSkill(draw_probability=0.0)
 trueskill.setup(env=env)
 
-TIER_BOUNDARIES = {"Green": (0, 20), "Yellow": (20, 30), "Orange": (30, 40), "Red": (40, float("inf"))}
-TIER_NAMES = ["Green", "Yellow", "Orange", "Red"]
-STARTING_MU = {"Green": 15.0, "Yellow": 25.0, "Orange": 35.0, "Red": 45.0}
-SIGMA_CONFIDENCE_THRESHOLD = 6.0
+TIERS = ["Beginner", "Intermediate", "Advanced", "Elite"]
+TIER_ORDER = {t: i for i, t in enumerate(TIERS)}
 
-RATING_RANGES = {
-    "Green": (0, 999),
-    "Yellow": (1000, 1499),
-    "Orange": (1500, 1999),
-    "Red": (2000, 9999),
+TIER_BOUNDARIES = {
+    "Beginner": (0,20),
+    "Intermediate": (20,30),
+    "Advanced": (30,40),
+    "Elite": (40,float("inf")),
 }
 
+STARTING_MU = {
+    "Beginner": 15.0,
+    "Intermediate": 25.0,
+    "Advanced": 35.0,
+    "Elite": 45.0,
+}
 
-def compute_rating(mu: float) -> int:
-    """Converts mu to a display-friendly integer rating (mu * 50), clamped to [0, 9999]."""
+NUM_COURTS = 4
+POLL_INTERVAL = 2
+WAIT_BONUS = 0.4
+SIGMA_THRESHOLD = 6.0
+
+
+def compute_rating(mu):
     return max(0, min(9999, int(round(mu * 50))))
 
 
-def fetch_queue() -> list[dict]:
-    """
-    Pulls all entries from Firestore 'queue' collection, oldest first.
-    Fetches the linked player doc for each and merges them into one dict.
-    
-    Returns:
-        list[dict]: merged queue + player data, sorted by check_in_time ASC
-    """
-    queue_docs = (
-        db.collection("queue")
-        .order_by("check_in_time")
-        .stream()
-    )
+def normalise_tier(raw):
+    if raw in TIER_ORDER:
+        return raw
+    return TIER_FALLBACK.get(raw, "Intermediate")
 
-    queue: list[dict] = []
+
+def fetch_queue():
+    queue_docs = list(db.collection("queue").order_by("check_in_time").stream())
+    if not queue_docs:
+        return []
+
+    refs = [db.collection("players").document(q.to_dict()["player_id"]) for q in queue_docs]
+    player_map = {s.id: s.to_dict() for s in db.get_all(refs) if s.exists}
+
+    queue = []
     for q_doc in queue_docs:
         q = q_doc.to_dict()
-        q["queue_doc_id"] = q_doc.id
-
-        player_ref = db.collection("players").document(q["player_id"])
-        player_snap = player_ref.get()
-        if not player_snap.exists:
+        pid = q["player_id"]
+        player = player_map.get(pid)
+        if not player:
             continue
-
-        player = player_snap.to_dict()
-        player["player_doc_id"] = q["player_id"]
-
         entry = {**player, **q}
+        entry["queue_doc_id"]  = q_doc.id
+        entry["player_doc_id"] = pid
+        entry["colour_tier"]   = normalise_tier(entry.get("colour_tier") or entry.get("tier"))
         queue.append(entry)
-
     return queue
 
 
-def _all_team_splits(lobby: list[dict]):
-    """
-    Yields all 3 unique ways to split 4 players into 2v2 teams.
-    
-    Yields:
-        tuple(team_a, team_b): two lists of 2 player dicts each
-    """
+def _all_team_splits(lobby):
     indices = [0, 1, 2, 3]
-    seen: set[frozenset] = set()
+    seen = set()
     for pair in itertools.combinations(indices, 2):
         complement = tuple(i for i in indices if i not in pair)
         key = frozenset([pair, complement])
         if key not in seen:
             seen.add(key)
-            team_a = [lobby[pair[0]], lobby[pair[1]]]
-            team_b = [lobby[complement[0]], lobby[complement[1]]]
-            yield team_a, team_b
+            yield [lobby[pair[0]], lobby[pair[1]]], [lobby[complement[0]], lobby[complement[1]]]
 
 
-def _check_requests(lobby: list[dict]) -> bool:
-    """
-    Checks if teammate/opponent requests can be satisfied within this lobby.
-    If any request references a player NOT in the lobby, returns False.
-    """
+def _opponent_reqs(p):
+    return [r for r in [p.get("requested_opponent1"), p.get("requested_opponent2")] if r]
+
+
+def _check_requests(lobby):
     lobby_ids = {p["player_doc_id"] for p in lobby}
-
     for p in lobby:
-        # Check teammate request
         req_tm = p.get("requested_teammate")
         if req_tm and req_tm not in lobby_ids:
             return False
-            
-        # Check multiple opponent requests
-        opp_reqs = [p.get("requested_opponent"), p.get("requested_opponent1"), p.get("requested_opponent2")]
-        for req_op in opp_reqs:
-            if req_op and req_op not in lobby_ids:
+        for req_op in _opponent_reqs(p):
+            if req_op not in lobby_ids:
                 return False
     return True
 
 
-def _requests_satisfied(team_a: list[dict], team_b: list[dict]) -> bool:
-    """
-    Validates a specific 2v2 split against player requests.
-    Teammate requests must be on the same team, opponent requests on opposite.
-    """
+def _requests_satisfied(team_a, team_b):
     team_a_ids = {p["player_doc_id"] for p in team_a}
     team_b_ids = {p["player_doc_id"] for p in team_b}
-
-    for team, other_team_ids in [(team_a, team_b_ids), (team_b, team_a_ids)]:
+    for team, opp_ids in [(team_a, team_b_ids), (team_b, team_a_ids)]:
         team_ids = {p["player_doc_id"] for p in team}
         for p in team:
-            # Teammate check
             req_tm = p.get("requested_teammate")
             if req_tm and req_tm not in team_ids:
                 return False
-                
-            # Opponent check (multiple allowed)
-            opp_reqs = [p.get("requested_opponent"), p.get("requested_opponent1"), p.get("requested_opponent2")]
-            for req_op in opp_reqs:
-                if req_op and req_op not in other_team_ids:
+            for req_op in _opponent_reqs(p):
+                if req_op not in opp_ids:
                     return False
     return True
 
 
-def _lobby_is_unranked(lobby: list[dict]) -> bool:
-    """
-    Checks if a lobby should be flagged unranked due to tier distance.
-    If any two players are 2+ tiers apart, the match is unranked.
-    
-    Tier Order:
-        Green(0) > Yellow(1) > Orange(2) > Red(3)
-    """
-    tier_values = [{"Green": 0, "Yellow": 1, "Orange": 2, "Red": 3}[p["colour_tier"]] for p in lobby]
-    max_distance = max(tier_values) - min(tier_values)
-    return max_distance > 1
+def _lobby_is_unranked(lobby):
+    vals = [TIER_ORDER.get(p["colour_tier"], 1) for p in lobby]
+    return (max(vals) - min(vals)) > 1
 
 
-def find_best_match(queue: list[dict]) -> dict | None:
-    """
-    Finds the best 4-player lobby and 2v2 team split from the queue.
-    
-    Anchor Logic:
-        queue[0] is the longest waiting player, they must play
-        searches all C(n-1, 3) combinations for the other 3 players
-        evaluates all 3 possible team splits per combination
-    
-    Cost Function:
-        cost = skill_delta - (0.4 * total_wait_seconds)
-        lower cost = better match (balanced skill + rewarded wait time)
-    
-    Returns:
-        dict with team_a, team_b, cost, skill_delta, total_wait_min, unranked
-        None if fewer than 4 players in queue
-    """
+def find_best_match(queue):
     if len(queue) < 4:
         return None
 
-    anchor = queue[0]
-    candidates = queue[1:]
-    now = time.time()
-
+    anchor    = queue[0]
+    now       = time.time()
     best_cost = float("inf")
-    best_match: dict | None = None
+    best      = None
 
-    for trio in itertools.combinations(candidates, 3):
+    for trio in itertools.combinations(queue[1:], 3):
         lobby = [anchor, *trio]
 
         if not _check_requests(lobby):
             continue
 
-        unranked = _lobby_is_unranked(lobby)
-
-        if any(p.get("unranked_flag") for p in lobby):
-            unranked = True
+        unranked = _lobby_is_unranked(lobby) or any(p.get("unranked_flag") for p in lobby)
 
         for team_a, team_b in _all_team_splits(lobby):
             if not _requests_satisfied(team_a, team_b):
                 continue
 
-            skill_delta = abs(
-                sum(p["mu"] for p in team_a) - sum(p["mu"] for p in team_b)
-            )
-
-            total_wait = sum(now - p["check_in_time"] for p in lobby)
-            wait_bonus = 0.4 * total_wait
-
-            cost = skill_delta - wait_bonus
+            skill_delta = abs(sum(p["mu"] for p in team_a) - sum(p["mu"] for p in team_b))
+            total_wait  = sum(now - p["check_in_time"] for p in lobby)
+            cost        = skill_delta - (WAIT_BONUS * total_wait)
 
             if cost < best_cost:
                 best_cost = cost
-                best_match = {
-                    "team_a": team_a,
-                    "team_b": team_b,
-                    "cost": cost,
-                    "skill_delta": skill_delta,
-                    "total_wait_min": total_wait / 60,
-                    "unranked": unranked,
+                best = {
+                    "team_a": team_a, "team_b": team_b,
+                    "cost": cost, "skill_delta": skill_delta,
+                    "total_wait_min": total_wait / 60, "unranked": unranked,
                 }
 
-    return best_match
+    return best
 
 
-def update_ratings(
-    team_a_ids: list[str],
-    team_b_ids: list[str],
-    team_a_won: bool,
-    is_unranked: bool = False,
-) -> None:
-    """
-    Runs TrueSkill rating update and writes new values to Firestore.
-    
-    Args:
-        team_a_ids: list of 2 Firestore player doc IDs
-        team_b_ids: list of 2 Firestore player doc IDs
-        team_a_won: True if Team A won
-        is_unranked: if True, only increments games_played (mu/sigma unchanged)
-    
-    Note: Uses Firestore batch write so all 4 player updates are atomic.
-    """
+def update_ratings(team_a_ids, team_b_ids, team_a_won, is_unranked=False):
     all_ids = team_a_ids + team_b_ids
-    player_docs: dict[str, dict] = {}
-    for pid in all_ids:
-        snap = db.collection("players").document(pid).get()
-        if snap.exists:
-            player_docs[pid] = snap.to_dict()
+    player_docs = {
+        s.id: s.to_dict()
+        for s in db.get_all([db.collection("players").document(pid) for pid in all_ids])
+        if s.exists
+    }
 
     team_a_ratings = {pid: env.create_rating(player_docs[pid]["mu"], player_docs[pid]["sigma"]) for pid in team_a_ids}
     team_b_ratings = {pid: env.create_rating(player_docs[pid]["mu"], player_docs[pid]["sigma"]) for pid in team_b_ids}
 
     if not is_unranked:
-        if team_a_won:
-            (new_a, new_b) = env.rate([team_a_ratings, team_b_ratings], ranks=[0, 1])
-        else:
-            (new_a, new_b) = env.rate([team_a_ratings, team_b_ratings], ranks=[1, 0])
+        ranks = [0, 1] if team_a_won else [1, 0]
+        new_a, new_b = env.rate([team_a_ratings, team_b_ratings], ranks=ranks)
     else:
-        new_a = team_a_ratings
-        new_b = team_b_ratings
+        new_a, new_b = team_a_ratings, team_b_ratings
 
     batch = db.batch()
     for pid, rating in {**new_a, **new_b}.items():
         ref = db.collection("players").document(pid)
-        update_data = {"games_played": firestore.Increment(1)}
+        update = {"games_played": firestore.Increment(1)}
         if not is_unranked:
-            update_data["mu"] = rating.mu
-            update_data["sigma"] = rating.sigma
-        batch.update(ref, update_data)
-
+            update["mu"]    = rating.mu
+            update["sigma"] = rating.sigma
+        batch.update(ref, update)
     batch.commit()
 
 
-def check_tier_promotion(player_ids: list[str]) -> list[dict]:
-    """
-    Checks if any players should be promoted or demoted based on their mu.
-    Only triggers when sigma is below the confidence threshold (enough games played).
-
-    Args:
-        player_ids: list of Firestore player doc IDs to check
-
-    Returns:
-        list of dicts with player_id, name, old_tier, new_tier for each change
-    """
+def check_tier_promotion(player_ids):
+    snaps   = db.get_all([db.collection("players").document(pid) for pid in player_ids])
+    batch   = db.batch()
     changes = []
-    batch = db.batch()
 
-    for pid in player_ids:
-        snap = db.collection("players").document(pid).get()
+    for snap in snaps:
         if not snap.exists:
             continue
-
         p = snap.to_dict()
-
-        if p["sigma"] > SIGMA_CONFIDENCE_THRESHOLD:
+        if p.get("sigma", 999) > SIGMA_THRESHOLD:
             continue
 
-        current_tier = p["colour_tier"]
-        mu = p["mu"]
-
-        new_tier = current_tier
-        for tier_name in TIER_NAMES:
-            low, high = TIER_BOUNDARIES[tier_name]
+        current = normalise_tier(p.get("colour_tier") or p.get("tier"))
+        mu      = p["mu"]
+        new     = current
+        for name in TIERS:
+            low, high = TIER_BOUNDARIES[name]
             if low <= mu < high:
-                new_tier = tier_name
+                new = name
                 break
 
-        if new_tier != current_tier:
-            batch.update(db.collection("players").document(pid), {"colour_tier": new_tier})
-            changes.append({
-                "player_id": pid,
-                "name": p["name"],
-                "old_tier": current_tier,
-                "new_tier": new_tier,
-            })
+        if new != current:
+            batch.update(snap.reference, {"colour_tier": new})
+            changes.append({"player_id": snap.id, "name": p["name"], "old": current, "new": new})
 
     if changes:
         batch.commit()
+        for c in changes:
+            print(f"tier: {c['name']} {c['old']} → {c['new']}")
 
     return changes
 
 
-def record_match(match: dict, court_number: int, status: str = "in_progress") -> str:
-    """
-    Creates a new document in the 'matches' collection.
-    Auto-increments match_number based on the last recorded match.
-    
-    Args:
-        match: dict from find_best_match() with team_a, team_b, unranked
-        court_number: which court (1-4)
-        status: "standby" for on-deck matches, "in_progress" for active matches
-    
-    Returns:
-        str: auto-generated Firestore document ID for the match
-    """
-    existing = db.collection("matches").order_by("match_number", direction=firestore.Query.DESCENDING).limit(1).stream()
+def record_match(match, court_number, status="in_progress"):
+    existing = (
+        db.collection("matches")
+        .order_by("match_number", direction=firestore.Query.DESCENDING)
+        .limit(1)
+        .stream()
+    )
     last_num = 0
     for doc in existing:
         last_num = doc.to_dict().get("match_number", 0)
 
-    team_a_ids = [p["player_doc_id"] for p in match["team_a"]]
-    team_b_ids = [p["player_doc_id"] for p in match["team_b"]]
+    team_a_ids   = [p["player_doc_id"] for p in match["team_a"]]
+    team_b_ids   = [p["player_doc_id"] for p in match["team_b"]]
     team_a_names = [p["name"] for p in match["team_a"]]
     team_b_names = [p["name"] for p in match["team_b"]]
 
-    match_doc = {
-        "match_number": last_num + 1,
-        "court_number": court_number,
-        "team_a": team_a_ids,
-        "team_b": team_b_ids,
-        "team_a_names": team_a_names,
-        "team_b_names": team_b_names,
-        "winner": None,
-        "unranked": match["unranked"],
-        "skill_delta": match.get("skill_delta", 0),
-        "status": status,
-        "created_at": time.time(),
-    }
-    _, ref = db.collection("matches").add(match_doc)
+    _, ref = db.collection("matches").add({
+        "match_number":  last_num + 1,
+        "court_number":  court_number,
+        "team_a":        team_a_ids,
+        "team_b":        team_b_ids,
+        "team_a_names":  team_a_names,
+        "team_b_names":  team_b_names,
+        "winner":        None,
+        "unranked":      match["unranked"],
+        "skill_delta":   match.get("skill_delta", 0),
+        "status":        status,
+        "created_at":    time.time(),
+    })
     return ref.id
 
 
-def requeue_players(team_a_ids: list[str], team_b_ids: list[str], team_a_names: list[str], team_b_names: list[str]) -> None:
-    """
-    Sends all players back to the end of the queue.
-    """
-    all_player_ids = team_a_ids + team_b_ids
-    all_names = team_a_names + team_b_names
-    now = time.time()
+def _remove_from_queue(players):
     batch = db.batch()
+    for p in players:
+        qid = p.get("queue_doc_id")
+        if qid:
+            batch.delete(db.collection("queue").document(qid))
+    batch.commit()
 
-    for i, pid in enumerate(all_player_ids):
-        # We don't bother deleting old queue entries here because 
-        # players in matches have already been removed from the queue
-        # by create_standby_match.
-        new_ref = db.collection("queue").document()
-        batch.set(new_ref, {
-            "player_id": pid,
-            "name": all_names[i],
-            "check_in_time": now,
-            "requested_teammate": None,
-            "requested_opponent": None,
+
+def requeue_players(team_a_ids, team_b_ids, team_a_names, team_b_names):
+    now   = time.time()
+    batch = db.batch()
+    for pid, name in zip(team_a_ids + team_b_ids, team_a_names + team_b_names):
+        ref = db.collection("queue").document()
+        batch.set(ref, {
+            "player_id":           pid,
+            "name":                name,
+            "check_in_time":       now,
+            "requested_teammate":  None,
             "requested_opponent1": None,
             "requested_opponent2": None,
-            "unranked_flag": False,
+            "unranked_flag":       False,
         })
     batch.commit()
 
 
-def create_standby_match(court_number: int) -> dict | None:
-    """
-    Creates the next match on standby so players can get ready.
-    Pulls from the queue, records the match as "standby", and removes
-    those players from the queue so they aren't double-matched.
-    
-    Args:
-        court_number: which court this standby match is for
-    
-    Returns:
-        dict with match info and match_doc_id, or None if not enough players
-    """
-    queue = fetch_queue()
-    match = find_best_match(queue)
+def process_finished_matches():
+    finished = list(
+        db.collection("matches")
+        .where("status", "in", ["completed", "voided"])
+        .stream()
+    )
+    for doc in finished:
+        m      = doc.to_dict()
+        mid    = doc.id
+        status = m.get("status")
 
-    if match is None:
-        return None
+        if status == "completed":
+            update_ratings(
+                m["team_a"], m["team_b"],
+                team_a_won=(m.get("winner") in ("a", "Team A")),
+                is_unranked=m.get("unranked", False),
+            )
+            check_tier_promotion(m["team_a"] + m["team_b"])
+            requeue_players(m["team_a"], m["team_b"], m["team_a_names"], m["team_b_names"])
+            print(f"match #{m.get('match_number')} done, players requeued")
+        else:
+            print(f"match #{m.get('match_number')} voided, players checked out")
 
-    match_doc_id = record_match(match, court_number, status="standby")
-
-    all_players = match["team_a"] + match["team_b"]
-    batch = db.batch()
-    for p in all_players:
-        if "queue_doc_id" in p:
-            batch.delete(db.collection("queue").document(p["queue_doc_id"]))
-    batch.commit()
-
-    match["match_doc_id"] = match_doc_id
-    return match
-
-
-def activate_standby_match(match_doc_id: str) -> None:
-    """
-    Moves a standby match to in_progress when the court is ready.
-    
-    Args:
-        match_doc_id: Firestore document ID of the standby match
-    """
-    db.collection("matches").document(match_doc_id).update({
-        "status": "in_progress",
-        "started_at": time.time(),
-    })
+        db.collection("matches").document(mid).update({
+            "status":      "archived",
+            "archived_at": time.time(),
+        })
 
 
 def auto_matchmaking():
-    """
-    Finds available courts and assigns new matches.
-    After all courts are filled, creates a standby match if possible.
-    """
-    active_matches_docs = list(db.collection("matches").where("status", "in", ["in_progress", "standby"]).stream())
-    occupied_courts = set()
-    has_standby = False
-    
-    for d in active_matches_docs:
+    active = list(
+        db.collection("matches")
+        .where("status", "in", ["in_progress", "standby"])
+        .stream()
+    )
+
+    occupied:       set[int] = set()
+    standby_id:     str | None = None
+    standby_court:  int | None = None
+
+    for d in active:
         m = d.to_dict()
-        occupied_courts.add(m.get("court_number"))
+        court = m.get("court_number")
+        if court:
+            occupied.add(court)
         if m.get("status") == "standby":
-            has_standby = True
-    
-    for court_num in range(1, 5):
-        if court_num in occupied_courts:
-            continue
-            
+            standby_id    = d.id
+            standby_court = court
+
+    free = [c for c in range(1, NUM_COURTS + 1) if c not in occupied]
+
+    if not free and standby_id is None:
+        return
+
+    if standby_id and free:
+        target = standby_court if standby_court in free else free[0]
+        db.collection("matches").document(standby_id).update({
+            "status":       "in_progress",
+            "court_number": target,
+            "started_at":   time.time(),
+        })
+        print(f"court {target} active")
+        occupied.add(target)
+        free.remove(target)
+        standby_id = None
+
+    for court_num in free:
         queue = fetch_queue()
         if len(queue) < 4:
-            return
-            
-        print(f"Court {court_num} is free. Attempting to match...")
-        match = create_standby_match(court_num)
-        if match:
-            activate_standby_match(match["match_doc_id"])
-            print(f"  MATCH LIVE: Court {court_num} is now active.")
-            occupied_courts.add(court_num)
-        else:
-            print(f"  No valid match found for Court {court_num} (constraints not met)")
+            break
+        match = find_best_match(queue)
+        if not match:
+            continue
+        record_match(match, court_num, status="in_progress")
+        _remove_from_queue(match["team_a"] + match["team_b"])
+        occupied.add(court_num)
+        print(f"court {court_num} filled")
 
-    if not has_standby:
+    if standby_id is None:
         queue = fetch_queue()
         if len(queue) >= 4:
-            next_court = min(range(1, 5), key=lambda c: c)
-            print(f"Creating standby match for next available court...")
             match = find_best_match(queue)
             if match:
-                match_doc_id = record_match(match, next_court, status="standby")
-                all_players = match["team_a"] + match["team_b"]
-                batch = db.batch()
-                for p in all_players:
-                    if "queue_doc_id" in p:
-                        batch.delete(db.collection("queue").document(p["queue_doc_id"]))
-                batch.commit()
-                print(f"  STANDBY: Match ready on deck.")
+                record_match(match, min(range(1, NUM_COURTS + 1)), status="standby")
+                _remove_from_queue(match["team_a"] + match["team_b"])
+                print("standby ready")
 
 
-def process_finished_matches():
-    """
-    Checks for completed/voided matches to update ratings and re-queue players.
-    """
-    finished = db.collection("matches").where("status", "in", ["completed", "voided"]).stream()
-    
-    for doc in finished:
-        m = doc.to_dict()
-        mid = doc.id
-        status = m.get("status")
-        
-        print(f"Processing {status} Match #{m.get('match_number')}...")
-        
-        if status == "completed":
-            update_ratings(
-                m["team_a"], m["team_b"], 
-                team_a_won=(m["winner"] == "a" or m["winner"] == "Team A"),
-                is_unranked=m.get("unranked", False)
-            )
-            check_tier_promotion(m["team_a"] + m["team_b"])
-            
-        requeue_players(m["team_a"], m["team_b"], m["team_a_names"], m["team_b_names"])
-        
-        # Archive the match
-        db.collection("matches").document(mid).update({"status": "archived", "archived_at": time.time()})
-        print(f"  Match #{m.get('match_number')} archived and players re-queued.")
-
-
-def is_engine_enabled() -> bool:
+def is_engine_enabled():
     snap = db.collection("settings").document("engine").get()
-    if snap.exists:
-        return snap.to_dict().get("enabled", False)
-    return False
+    return snap.exists and snap.to_dict().get("enabled", False)
 
 
 def main_loop():
-    print("Matchmaking started")
-    
+    print("engine started")
     while True:
         try:
             if is_engine_enabled():
                 process_finished_matches()
                 auto_matchmaking()
-            
         except Exception as e:
-            print(f"ERROR: {e}")
-            
-        time.sleep(1)
+            print(f"error: {e}")
+            traceback.print_exc()
+        time.sleep(POLL_INTERVAL)
 
 
 if __name__ == "__main__":

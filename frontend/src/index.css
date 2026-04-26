@@ -15,10 +15,10 @@
   --color-on-primary: #faf7f6;
   --color-primary-container: #d9d9d9;
 
-  --color-skill-green: #4ade80;
-  --color-skill-yellow: #facc15;
-  --color-skill-orange: #fb923c;
-  --color-skill-red: #9f403d;
+  --color-skill-beginner: #ef4444;
+  --color-skill-intermediate: #3b82f6;
+  --color-skill-advanced: #14b8a6;
+  --color-skill-elite: #10b981;
 
   --font-display: 'Manrope', sans-serif;
   --font-body: 'Inter', sans-serif;
@@ -34,8 +34,13 @@
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
     -webkit-font-smoothing: antialiased;
   }
-  
-  h1, h2, h3, h4, h5, h6 {
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
     font-family: var(--font-display);
     letter-spacing: -0.02em;
     color: var(--color-on-surface);

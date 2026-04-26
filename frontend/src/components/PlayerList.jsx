@@ -6,15 +6,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '../lib/utils'
 import { collection, addDoc, deleteDoc, doc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
-import { SIGMA_CONFIDENCE_THRESHOLD } from '../lib/constants'
+import { TIER_BG } from '../lib/constants'
 import { useToast } from './ui/ToastProvider'
-
-const tierColours = {
-  Green: 'bg-skill-green',
-  Yellow: 'bg-skill-yellow',
-  Orange: 'bg-skill-orange',
-  Red: 'bg-skill-red',
-}
 
 export function PlayerList({ players, queue, queueSet, onPlayerClick }) {
   const { showToast } = useToast()
@@ -49,7 +42,8 @@ export function PlayerList({ players, queue, queueSet, onPlayerClick }) {
         name: player.name,
         check_in_time: Date.now() / 1000,
         requested_teammate: null,
-        requested_opponent: null,
+        requested_opponent1: null,
+        requested_opponent2: null,
         unranked_flag: false,
       })
       showToast(`${player.name} checked in`, 'success')
@@ -93,7 +87,8 @@ export function PlayerList({ players, queue, queueSet, onPlayerClick }) {
       </div>
 
       <div className="w-full flex flex-col flex-1">
-        <div className="grid grid-cols-[2fr_1fr_1fr_1fr] border-b border-outline-variant pb-3 mb-1 text-[10px] font-bold tracking-widest text-on-surface-variant uppercase">
+        {/* Table header */}
+        <div className="grid grid-cols-[2fr_1.2fr_0.8fr_1fr] border-b border-outline-variant pb-3 mb-1 text-[10px] font-bold tracking-widest text-on-surface-variant uppercase">
           <div>Name</div>
           <div className="text-center">Tier</div>
           <div className="text-center">Rating</div>
@@ -107,44 +102,51 @@ export function PlayerList({ players, queue, queueSet, onPlayerClick }) {
               initial={{ x: 150, opacity: 0 }}
               animate={{ x: 0, opacity: 1 }}
               exit={{ x: -150, opacity: 0 }}
-              transition={{ type: "spring", stiffness: 300, damping: 30 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 30 }}
               className="flex flex-col w-full"
             >
               {paginatedPlayers.map((p) => {
                 const isCheckedIn = queueSet.has(p.id)
-                const isCalibrating = p.sigma > SIGMA_CONFIDENCE_THRESHOLD
                 const isLoading = loadingId === p.id
+
                 return (
                   <div
                     key={p.id}
                     onClick={() => onPlayerClick(p)}
-                    className="grid grid-cols-[2fr_1fr_1fr_1fr] items-center py-2.5 border-b border-outline-variant last:border-0 hover:bg-surface-low/50 transition-colors -mx-4 px-4 overflow-hidden cursor-pointer"
+                    className="grid grid-cols-[2fr_1.2fr_0.8fr_1fr] items-center py-2.5 border-b border-outline-variant last:border-0 hover:bg-surface-low/50 transition-colors -mx-4 px-4 overflow-hidden cursor-pointer"
                   >
-                    <div className="flex items-center gap-2 pr-2">
-                      <span className="text-[13px] font-semibold truncate">{p.name}</span>
+                    {/* Name column — no dot here */}
+                    <div className="pr-2">
+                      <span className="text-[13px] font-semibold truncate block">{p.name}</span>
                     </div>
-                    <div className="flex justify-center">
-                      <span className={cn("w-2 h-2 rounded-full", tierColours[p.tier] || tierColours.Green)} />
+
+                    {/* Tier column — dot only, centred */}
+                    <div className="flex items-center justify-center">
+                      <span className={cn('w-2 h-2 rounded-full flex-shrink-0', TIER_BG[p.tier])} />
                     </div>
+
+                    {/* Rating column */}
                     <div className="text-[12px] font-mono text-center tracking-wide text-on-surface-variant whitespace-nowrap">
                       {p.rating}
                     </div>
+
+                    {/* Action column */}
                     <div className="flex justify-end">
                       {isLoading ? (
-                        <div className="h-6 w-18 flex items-center justify-center">
+                        <div className="h-6 flex items-center justify-center px-3">
                           <Loader2 size={12} className="animate-spin text-on-surface-variant" />
                         </div>
                       ) : isCheckedIn ? (
                         <button
                           onClick={(e) => { e.stopPropagation(); handleCheckOut(p) }}
-                          className="h-6 w-18 px-3 whitespace-nowrap rounded-sm text-[8px] font-bold tracking-wider uppercase bg-skill-red/10 text-skill-red hover:bg-skill-red/20 transition-colors"
+                          className="h-6 px-3 whitespace-nowrap rounded-sm text-[8px] font-bold tracking-wider uppercase bg-skill-beginner text-white hover:bg-skill-beginner/80 active:scale-95 transition-all"
                         >
                           Check-Out
                         </button>
                       ) : (
                         <button
                           onClick={(e) => { e.stopPropagation(); handleCheckIn(p) }}
-                          className="h-6 w-18 px-3 whitespace-nowrap rounded-sm text-[8px] font-bold tracking-wider uppercase bg-surface-lowest border border-outline-variant text-on-surface hover:bg-surface-low transition-colors"
+                          className="h-6 px-3 whitespace-nowrap rounded-sm text-[8px] font-bold tracking-wider uppercase bg-surface-lowest border border-outline-variant text-on-surface hover:bg-surface-low transition-colors"
                         >
                           Check-In
                         </button>
@@ -158,8 +160,8 @@ export function PlayerList({ players, queue, queueSet, onPlayerClick }) {
         </div>
 
         <div className={cn(
-          "flex items-center justify-between pt-3 mt-auto border-t border-outline-variant",
-          totalPages <= 1 && "invisible"
+          'flex items-center justify-between pt-3 mt-auto border-t border-outline-variant',
+          totalPages <= 1 && 'invisible'
         )}>
           <span className="text-[11px] font-medium text-on-surface-variant">
             Page {safePage + 1} of {totalPages}
