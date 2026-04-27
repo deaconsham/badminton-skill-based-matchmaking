@@ -4,12 +4,12 @@ import { Input } from './ui/Input'
 import { Search, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '../lib/utils'
-import { collection, addDoc, deleteDoc, doc } from 'firebase/firestore'
+import { collection, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { TIER_BG } from '../lib/constants'
 import { useToast } from './ui/ToastProvider'
 
-export function PlayerList({ players, queue, queueSet, onPlayerClick }) {
+export function PlayerList({ players, queue, queueSet, inMatchSet, onPlayerClick }) {
   const { showToast } = useToast()
   const [currentPage, setCurrentPage] = useState(0)
   const [searchQuery, setSearchQuery] = useState('')
@@ -46,6 +46,7 @@ export function PlayerList({ players, queue, queueSet, onPlayerClick }) {
         requested_opponent2: null,
         unranked_flag: false,
       })
+      await updateDoc(doc(db, 'players', player.id), { is_in_queue: true })
       showToast(`${player.name} checked in`, 'success')
     } catch (err) {
       console.error('Check-in failed:', err)
@@ -60,6 +61,7 @@ export function PlayerList({ players, queue, queueSet, onPlayerClick }) {
     setLoadingId(player.id)
     try {
       await deleteDoc(doc(db, 'queue', entry.queueDocId))
+      await updateDoc(doc(db, 'players', player.id), { is_in_queue: false })
       showToast(`${player.name} checked out`, 'info')
     } catch (err) {
       console.error('Check-out failed:', err)
@@ -107,6 +109,7 @@ export function PlayerList({ players, queue, queueSet, onPlayerClick }) {
             >
               {paginatedPlayers.map((p) => {
                 const isCheckedIn = queueSet.has(p.id)
+                const isPlaying = inMatchSet.has(p.id)
                 const isLoading = loadingId === p.id
 
                 return (
@@ -132,7 +135,11 @@ export function PlayerList({ players, queue, queueSet, onPlayerClick }) {
 
                     {/* Action column */}
                     <div className="flex justify-end">
-                      {isLoading ? (
+                      {isPlaying ? (
+                        <span className="h-6 px-3 flex items-center whitespace-nowrap rounded-sm text-[8px] font-bold tracking-wider uppercase bg-skill-advanced/20 text-skill-advanced border border-skill-advanced/30">
+                          Playing
+                        </span>
+                      ) : isLoading ? (
                         <div className="h-6 flex items-center justify-center px-3">
                           <Loader2 size={12} className="animate-spin text-on-surface-variant" />
                         </div>

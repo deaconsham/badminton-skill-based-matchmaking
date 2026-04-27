@@ -122,5 +122,10 @@ export function useFirestore() {
 
   const standby = matches.find((m) => m.status === 'standby') || null
 
-  return { players, queue: enrichedQueue, queueSet, matches, courts, standby, loading }
+  // All player IDs currently assigned to an active or standby match
+  const inMatchSet = new Set(
+    matches.flatMap((m) => [...m.teamA, ...m.teamB])
+  )
+
+  return { players, queue: enrichedQueue, queueSet, inMatchSet, matches, courts, standby, loading }
 }

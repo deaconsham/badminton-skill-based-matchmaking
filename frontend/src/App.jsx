@@ -35,7 +35,7 @@ function ToggleSwitch({ checked, onChange, label, disabled }) {
 
 function Dashboard() {
   const { showToast } = useToast()
-  const { players, queue, queueSet, courts, standby, loading } = useFirestore()
+  const { players, queue, queueSet, inMatchSet, courts, standby, loading } = useFirestore()
   const [selectedPlayer, setSelectedPlayer] = useState(null)
   const [engineEnabled, setEngineEnabled] = useState(false)
   const [engineLoading, setEngineLoading] = useState(true)
@@ -65,8 +65,10 @@ function Dashboard() {
   }
 
   const handleCheckOutAll = async () => {
-    if (queue.length === 0) {
-      showToast('No players in queue', 'info')
+    const standbyPlayerCount = standby ? 4 : 0
+    const totalCount = queue.length + standbyPlayerCount
+    if (totalCount === 0) {
+      showToast('No players to check out', 'info')
       return
     }
     setCheckingOutAll(true)
@@ -74,9 +76,17 @@ function Dashboard() {
       const batch = writeBatch(db)
       for (const entry of queue) {
         batch.delete(doc(db, 'queue', entry.queueDocId))
+        batch.update(doc(db, 'players', entry.playerId), { is_in_queue: false })
+      }
+      if (standby) {
+        batch.update(doc(db, 'matches', standby.id), { status: 'voided' })
+        const standbyPlayers = [...(standby.teamA || []), ...(standby.teamB || [])]
+        for (const pid of standbyPlayers) {
+          batch.update(doc(db, 'players', pid), { is_in_standby: false })
+        }
       }
       await batch.commit()
-      showToast(`Checked out ${queue.length} player${queue.length !== 1 ? 's' : ''}`, 'info')
+      showToast(`Checked out ${totalCount} player${totalCount !== 1 ? 's' : ''}`, 'info')
     } catch (err) {
       console.error(err)
       showToast('Failed to check out all players', 'warning')
@@ -153,6 +163,7 @@ function Dashboard() {
             players={players}
             queue={queue}
             queueSet={queueSet}
+            inMatchSet={inMatchSet}
             onPlayerClick={setSelectedPlayer}
           />
         </div>

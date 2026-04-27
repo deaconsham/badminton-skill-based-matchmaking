@@ -3,7 +3,7 @@ import { Card } from './ui/Card'
 import { Trash2 } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { TIER_BG, TIER_COLOUR, RATING_RANGES, TIERS } from '../lib/constants'
-import { doc, updateDoc } from 'firebase/firestore'
+import { doc, updateDoc, writeBatch } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { useToast } from './ui/ToastProvider'
 
@@ -66,7 +66,13 @@ function CourtCard({ court, allPlayers }) {
   const handleVoid = async () => {
     setSubmitting('void')
     try {
-      await updateDoc(doc(db, 'matches', court.id), { status: 'voided' })
+      const batch = writeBatch(db)
+      batch.update(doc(db, 'matches', court.id), { status: 'voided' })
+      const playersInMatch = [...(court.teamA || []), ...(court.teamB || [])]
+      playersInMatch.forEach(pid => {
+        batch.update(doc(db, 'players', pid), { is_in_game: false })
+      })
+      await batch.commit()
       showToast('Match voided (players checked out)', 'info')
       setConfirmVoid(false)
     } catch (err) {
