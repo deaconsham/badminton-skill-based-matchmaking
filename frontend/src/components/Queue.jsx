@@ -120,7 +120,17 @@ export function Queue({ standby, queue, allPlayers, itemsPerPage = 6 }) {
                       #{absoluteIndex + 1}
                     </span>
                     <div className="flex flex-col flex-1 min-w-0">
-                      <span className="text-[13px] font-bold truncate">{p.name}</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[13px] font-bold truncate">{p.name}</span>
+                        {p.requestedTeammate && (
+                          <div className="flex items-center text-skill-advanced gap-1">
+                             <Link size={10} />
+                             <span className="text-[9px] font-medium truncate">
+                               {allPlayers?.find(pl => pl.id === p.requestedTeammate)?.name}
+                             </span>
+                          </div>
+                        )}
+                      </div>
                       <div className="flex items-center gap-1.5 mt-0.5">
                         <TierDot tier={p.tier} />
                         <span className="text-[9px] font-mono tracking-wider text-on-surface-variant uppercase">

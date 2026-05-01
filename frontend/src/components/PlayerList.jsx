@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { Card } from './ui/Card'
 import { Input } from './ui/Input'
-import { Search, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
+import { Search, ChevronLeft, ChevronRight, Loader2, Link } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '../lib/utils'
 import { collection, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore'

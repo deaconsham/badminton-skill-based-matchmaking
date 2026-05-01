@@ -6,7 +6,7 @@ env = trueskill.TrueSkill(draw_probability=0.0)
 trueskill.setup(env=env)
 
 SPREAD_THRESHOLD = 10.0
-STARVATION_RELAX_PER_MIN = 1.0
+STARVATION_RELAX_PER_MIN = 0.25
 
 def _all_team_splits(lobby):
     indices = [0, 1, 2, 3]
@@ -58,10 +58,16 @@ def _best_split(lobby):
         quality = env.quality([team_a_ratings, team_b_ratings])
         
         spread_a = abs(team_a[0]["mu"] - team_a[1]["mu"])
+        if team_a[0].get("requested_teammate") == team_a[1]["player_doc_id"] and team_a[1].get("requested_teammate") == team_a[0]["player_doc_id"]:
+            spread_a = 0.0
+
         spread_b = abs(team_b[0]["mu"] - team_b[1]["mu"])
-        disparity_penalty = abs(spread_a - spread_b)
+        if team_b[0].get("requested_teammate") == team_b[1]["player_doc_id"] and team_b[1].get("requested_teammate") == team_b[0]["player_doc_id"]:
+            spread_b = 0.0
+
+        disparity_penalty = spread_a + spread_b
         
-        split_score = (quality * 100.0) - (disparity_penalty * 2.0)
+        split_score = (quality * 100.0) - (disparity_penalty * 2.0) - (_lobby_spread(lobby) * 1.0)
         
         if split_score > best_score:
             best_score = split_score
@@ -81,8 +87,8 @@ def _score_lobby(lobby):
     if team_a is None:
         return None
         
-    heuristic_score = (quality * 100.0) - (disparity_penalty * 2.0)
     real_spread = _lobby_spread(lobby)
+    heuristic_score = (quality * 100.0) - (disparity_penalty * 2.0) - (real_spread * 1.0)
     
     unranked = False
     if skill_delta > 15.0 or real_spread > 20.0:
@@ -119,6 +125,9 @@ def _find_match_queue_traversal(pool, in_progress_players):
     now = time.time()
     stalling_players = set()
     
+    global_best_match = None
+    global_best_score = -float('inf')
+    
     for anchor in pool:
         if anchor["player_doc_id"] in stalling_players:
             continue
@@ -142,6 +151,7 @@ def _find_match_queue_traversal(pool, in_progress_players):
             
             lobby_check_ins = [p.get("check_in_time", now) for p in lobby if "check_in_time" in p]
             lobby_max_wait = (now - min(lobby_check_ins)) / 60.0 if lobby_check_ins else 0.0
+            
             relaxed_threshold = SPREAD_THRESHOLD + (lobby_max_wait * STARVATION_RELAX_PER_MIN)
             
             if spread <= relaxed_threshold:
@@ -149,9 +159,13 @@ def _find_match_queue_traversal(pool, in_progress_players):
                 
             if spread <= 30.0:
                 match_data = _score_lobby(lobby)
-                if match_data and match_data["heuristic_score"] > best_curr_score:
-                    best_curr_score = match_data["heuristic_score"]
-                    best_curr_match = match_data
+                if match_data:
+                    wait_bonus = lobby_max_wait * 2.0 
+                    adjusted_score = match_data["heuristic_score"] + wait_bonus
+                    
+                    if adjusted_score > best_curr_score:
+                        best_curr_score = adjusted_score
+                        best_curr_match = match_data
                     
         best_future_score = -float('inf')
         future_pool = other_q + in_progress_players
@@ -171,9 +185,11 @@ def _find_match_queue_traversal(pool, in_progress_players):
             continue
             
         if has_fair_current and best_curr_match:
-            return best_curr_match
+            if best_curr_score > global_best_score:
+                global_best_score = best_curr_score
+                global_best_match = best_curr_match
             
-    return None
+    return global_best_match
 
 def find_best_matches(state):
     """core logic to figure out who plays next based on trueskill spread, wait time, and available courts"""
@@ -215,20 +231,17 @@ def find_best_matches(state):
             available_pool = [p for p in available_pool if p["player_doc_id"] not in matched_ids]
             in_progress_players.extend(match["team_a"] + match["team_b"])
         else:
-            if total_players_in_building >= 16:
-                match = _find_fairest_fallback(available_pool)
-                if match:
-                    court_num = free_courts.pop(0)
-                    matches_to_create.append({
-                        "type": "new_match",
-                        "court_number": court_num,
-                        "match_data": match
-                    })
-                    matched_ids = {p["player_doc_id"] for p in match["team_a"] + match["team_b"]}
-                    available_pool = [p for p in available_pool if p["player_doc_id"] not in matched_ids]
-                    in_progress_players.extend(match["team_a"] + match["team_b"])
-                else:
-                    break
+            match = _find_fairest_fallback(available_pool)
+            if match:
+                court_num = free_courts.pop(0)
+                matches_to_create.append({
+                    "type": "new_match",
+                    "court_number": court_num,
+                    "match_data": match
+                })
+                matched_ids = {p["player_doc_id"] for p in match["team_a"] + match["team_b"]}
+                available_pool = [p for p in available_pool if p["player_doc_id"] not in matched_ids]
+                in_progress_players.extend(match["team_a"] + match["team_b"])
             else:
                 break
                 

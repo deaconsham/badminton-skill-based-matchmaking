@@ -52,6 +52,14 @@ export function PlayerModel({ player, allPlayers, queue, queueSet, onClose }) {
       if (newValue) {
         const newEntry = queue.find((q) => q.playerId === newValue)
         if (newEntry) {
+          const prevBRequest = newEntry.requestedTeammate
+          if (prevBRequest && prevBRequest !== player.id) {
+            const cEntry = queue.find((q) => q.playerId === prevBRequest)
+            if (cEntry && cEntry.requestedTeammate === newEntry.playerId) {
+              await updateDoc(doc(db, 'queue', cEntry.queueDocId), { requested_teammate: null })
+            }
+          }
+
           await updateDoc(doc(db, 'queue', newEntry.queueDocId), {
             requested_teammate: player.id,
           })

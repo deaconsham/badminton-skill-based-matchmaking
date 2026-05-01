@@ -59,8 +59,13 @@ def main():
         print(f"received snapshot event ({len(changes)} changes). debouncing")
         debouncer.trigger()
 
+    def on_settings_snapshot(doc_snapshot, changes, read_time):
+        print("received settings snapshot event. debouncing")
+        debouncer.trigger()
+
     queue_watch = db.collection("queue").on_snapshot(on_snapshot_callback)
     matches_watch = db.collection("matches").on_snapshot(on_snapshot_callback)
+    settings_watch = db.collection("settings").document("engine").on_snapshot(on_settings_snapshot)
     
     print("engine is running")
     
@@ -71,6 +76,7 @@ def main():
         print("shutting down listeners...")
         queue_watch.unsubscribe()
         matches_watch.unsubscribe()
+        settings_watch.unsubscribe()
         sys.exit(0)
 
 if __name__ == "__main__":

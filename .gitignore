@@ -4,4 +4,4 @@ __pycache__/
 serviceAccountKey.json
 .env
 badminton-matchmaking-9b69f-firebase-adminsdk-fbsvc-cceede915a.json
-backend/__pycache__/
+backend/__pycache__/   

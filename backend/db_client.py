@@ -15,7 +15,7 @@ TIER_BOUNDARIES = {
     "Elite": (40,float("inf")),
 }
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CRED_PATH = os.path.join(BASE_DIR, "badminton-matchmaking-9b69f-firebase-adminsdk-fbsvc-cceede915a.json")
 
 if not firebase_admin._apps:
