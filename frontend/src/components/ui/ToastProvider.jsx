@@ -9,7 +9,6 @@ export function useToast() {
 }
 
 export function ToastProvider({ children }) {
-  // Notifications disabled per user request
   const showToast = useCallback(() => {}, [])
 
   return (

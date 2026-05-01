@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { collection, onSnapshot, query, orderBy, where } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { computeRating } from '../lib/constants'
@@ -54,9 +54,6 @@ export function useFirestore() {
             name: d.name,
             checkInTime: d.check_in_time,
             requestedTeammate: d.requested_teammate || null,
-            requestedOpponent1: d.requested_opponent1 || null,
-            requestedOpponent2: d.requested_opponent2 || null,
-            unrankedFlag: d.unranked_flag || false,
           }
         })
         setQueue(data)
@@ -122,7 +119,6 @@ export function useFirestore() {
 
   const standby = matches.find((m) => m.status === 'standby') || null
 
-  // All player IDs currently assigned to an active or standby match
   const inMatchSet = new Set(
     matches.flatMap((m) => [...m.teamA, ...m.teamB])
   )

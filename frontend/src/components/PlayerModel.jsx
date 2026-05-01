@@ -20,7 +20,6 @@ export function PlayerModel({ player, allPlayers, queue, queueSet, onClose }) {
   const rank = allPlayers.findIndex((p) => p.id === player.id) + 1
   const tierColour = TIER_COLOUR[player.tier] || '#5a6061'
 
-  // Other checked-in players (excluding this one) for request dropdowns
   const checkedInPlayers = queue
     .filter((q) => q.playerId !== player.id)
     .map((q) => {
@@ -29,64 +28,33 @@ export function PlayerModel({ player, allPlayers, queue, queueSet, onClose }) {
     })
     .filter(Boolean)
 
-  // Map Firestore field name → camelCase key on queueEntry
   const FIELD_KEY = {
-    requested_teammate:  'requestedTeammate',
-    requested_opponent1: 'requestedOpponent1',
-    requested_opponent2: 'requestedOpponent2',
+    requested_teammate: 'requestedTeammate',
   }
 
   const handleRequestChange = async (field, value) => {
     if (!queueEntry) return
     setSaving(true)
     try {
-      const newValue  = value || null
+      const newValue = value || null
       const prevValue = queueEntry[FIELD_KEY[field]] || null
 
-      // --- 1. Update the current player ---
       const myRef = doc(db, 'queue', queueEntry.queueDocId)
       await updateDoc(myRef, { [field]: newValue })
 
-      // --- 2. Clear the OLD target's reverse link ---
       if (prevValue && prevValue !== newValue) {
         const prevEntry = queue.find((q) => q.playerId === prevValue)
-        if (prevEntry) {
-          const clear = {}
-          if (field === 'requested_teammate') {
-            if (prevEntry.requestedTeammate === player.id) clear.requested_teammate = null
-          } else {
-            // opponent slot — clear whichever slot points back at this player
-            if (prevEntry.requestedOpponent1 === player.id) clear.requested_opponent1 = null
-            if (prevEntry.requestedOpponent2 === player.id) clear.requested_opponent2 = null
-          }
-          if (Object.keys(clear).length)
-            await updateDoc(doc(db, 'queue', prevEntry.queueDocId), clear)
+        if (prevEntry && prevEntry.requestedTeammate === player.id) {
+          await updateDoc(doc(db, 'queue', prevEntry.queueDocId), { requested_teammate: null })
         }
       }
 
-      // --- 3. Set the NEW target's reverse link ---
       if (newValue) {
         const newEntry = queue.find((q) => q.playerId === newValue)
         if (newEntry) {
-          if (field === 'requested_teammate') {
-            // Always mirror partner (overwrite if they had someone else)
-            await updateDoc(doc(db, 'queue', newEntry.queueDocId), {
-              requested_teammate: player.id,
-            })
-          } else {
-            // Opponent: fill first free slot (skip if already linked)
-            const alreadyLinked =
-              newEntry.requestedOpponent1 === player.id ||
-              newEntry.requestedOpponent2 === player.id
-            if (!alreadyLinked) {
-              if (!newEntry.requestedOpponent1) {
-                await updateDoc(doc(db, 'queue', newEntry.queueDocId), { requested_opponent1: player.id })
-              } else if (!newEntry.requestedOpponent2) {
-                await updateDoc(doc(db, 'queue', newEntry.queueDocId), { requested_opponent2: player.id })
-              }
-              // else both slots taken — skip silently
-            }
-          }
+          await updateDoc(doc(db, 'queue', newEntry.queueDocId), {
+            requested_teammate: player.id,
+          })
         }
       }
 
@@ -164,14 +132,12 @@ export function PlayerModel({ player, allPlayers, queue, queueSet, onClose }) {
               <StatBox label="Games Played" value={player.gamesPlayed} />
             </div>
 
-            {/* Match Requests — only shown when checked in */}
             {isCheckedIn && (
               <div className="flex flex-col gap-3">
                 <span className="text-[10px] font-bold tracking-widest uppercase text-on-surface-variant">
                   Match Requests
                 </span>
 
-                {/* Partner (1 player) */}
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-skill-advanced flex-shrink-0" />
@@ -186,49 +152,13 @@ export function PlayerModel({ player, allPlayers, queue, queueSet, onClose }) {
                     className="h-9 rounded-sm bg-surface-low px-2 text-[11px] font-medium text-on-surface focus:outline-none focus:ring-1 focus:ring-skill-advanced/30 transition-all cursor-pointer"
                   >
                     <option value="">None</option>
-                    {checkedInPlayers
-                      .filter((p) => p.id !== queueEntry?.requestedOpponent1 && p.id !== queueEntry?.requestedOpponent2)
-                      .map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    {checkedInPlayers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                   </select>
                 </div>
 
-                {/* Opponents (up to 2 players) */}
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-skill-beginner flex-shrink-0" />
-                    <label className="text-[8px] font-bold tracking-widest uppercase" style={{ color: '#ef4444' }}>
-                      Opponents <span className="opacity-60 font-normal normal-case">(up to 2)</span>
-                    </label>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <select
-                      disabled={saving}
-                      value={queueEntry?.requestedOpponent1 || ''}
-                      onChange={(e) => handleRequestChange('requested_opponent1', e.target.value)}
-                      className="h-9 rounded-sm bg-surface-low px-2 text-[11px] font-medium text-on-surface focus:outline-none focus:ring-1 focus:ring-skill-beginner/30 transition-all cursor-pointer"
-                    >
-                      <option value="">None</option>
-                      {checkedInPlayers
-                        .filter((p) => p.id !== queueEntry?.requestedTeammate && p.id !== queueEntry?.requestedOpponent2)
-                        .map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                    <select
-                      disabled={saving}
-                      value={queueEntry?.requestedOpponent2 || ''}
-                      onChange={(e) => handleRequestChange('requested_opponent2', e.target.value)}
-                      className="h-9 rounded-sm bg-surface-low px-2 text-[11px] font-medium text-on-surface focus:outline-none focus:ring-1 focus:ring-skill-beginner/30 transition-all cursor-pointer"
-                    >
-                      <option value="">None</option>
-                      {checkedInPlayers
-                        .filter((p) => p.id !== queueEntry?.requestedTeammate && p.id !== queueEntry?.requestedOpponent1)
-                        .map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                  </div>
-                </div>
               </div>
             )}
 
-            {/* Delete */}
             <div className="border-t border-outline-variant pt-4">
               {!confirmDelete ? (
                 <button

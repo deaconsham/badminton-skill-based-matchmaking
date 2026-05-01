@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { Register } from './components/Register'
 import { Courts } from './components/Courts'
 import { PlayerList } from './components/PlayerList'

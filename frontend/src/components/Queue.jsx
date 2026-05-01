@@ -23,18 +23,16 @@ export function Queue({ standby, queue, allPlayers, itemsPerPage = 6 }) {
   const [, setTick] = useState(0)
   const totalPages = Math.max(1, Math.ceil(queue.length / itemsPerPage))
 
-  useEffect(() => {
-    if (currentPage >= totalPages && totalPages > 0) setCurrentPage(totalPages - 1)
-  }, [totalPages, currentPage])
+  const activePage = Math.max(0, Math.min(currentPage, totalPages - 1))
 
   useEffect(() => {
     const interval = setInterval(() => setTick((t) => t + 1), 60000)
     return () => clearInterval(interval)
   }, [])
 
-  const paginatedQueue = queue.slice(currentPage * itemsPerPage, (currentPage + 1) * itemsPerPage)
-  const nextPage = () => setCurrentPage((p) => Math.min(totalPages - 1, p + 1))
-  const prevPage = () => setCurrentPage((p) => Math.max(0, p - 1))
+  const paginatedQueue = queue.slice(activePage * itemsPerPage, (activePage + 1) * itemsPerPage)
+  const nextPage = () => setCurrentPage((p) => Math.min(totalPages - 1, Math.max(0, Math.min(p, totalPages - 1)) + 1))
+  const prevPage = () => setCurrentPage((p) => Math.max(0, Math.min(p, totalPages - 1) - 1))
 
   const resolvePlayerData = (ids, names) => {
     if (!ids || !allPlayers) return (names || []).map((n) => ({ name: n, tier: 'Beginner', rating: 0 }))
@@ -53,7 +51,6 @@ export function Queue({ standby, queue, allPlayers, itemsPerPage = 6 }) {
 
   return (
     <>
-      {/* Match Standby card */}
       <Card className="p-5 flex flex-col h-[250px]">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-[13px] font-bold tracking-widest uppercase text-on-surface-variant">Match Standby</h2>
@@ -67,7 +64,6 @@ export function Queue({ standby, queue, allPlayers, itemsPerPage = 6 }) {
         {standby ? (
           <div className="rounded-lg border border-outline-variant p-3 bg-surface-low mb-auto h-[120px]">
             <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4">
-              {/* Team A */}
               <div className="flex flex-col gap-2">
                 <div className="text-[8px] font-bold tracking-widest text-on-surface-variant uppercase text-center mb-0.5">Team A</div>
                 {standbyTeamA.map((p, i) => (
@@ -81,7 +77,6 @@ export function Queue({ standby, queue, allPlayers, itemsPerPage = 6 }) {
 
               <div className="text-[10px] font-bold text-on-surface-variant">VS</div>
 
-              {/* Team B */}
               <div className="flex flex-col gap-2">
                 <div className="text-[8px] font-bold tracking-widest text-on-surface-variant uppercase text-center mb-0.5">Team B</div>
                 {standbyTeamB.map((p, i) => (
@@ -101,7 +96,6 @@ export function Queue({ standby, queue, allPlayers, itemsPerPage = 6 }) {
         )}
       </Card>
 
-      {/* Queue card */}
       <Card className="p-5 flex flex-col h-[250px]">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-[13px] font-bold tracking-widest uppercase text-on-surface-variant">Queue</h2>
@@ -111,7 +105,7 @@ export function Queue({ standby, queue, allPlayers, itemsPerPage = 6 }) {
         <div className="flex-1 relative overflow-hidden flex flex-col h-[160px]">
           <AnimatePresence mode="popLayout" initial={false}>
             <motion.div
-              key={currentPage}
+              key={activePage}
               initial={{ x: 150, opacity: 0 }}
               animate={{ x: 0, opacity: 1 }}
               exit={{ x: -150, opacity: 0 }}
@@ -119,7 +113,7 @@ export function Queue({ standby, queue, allPlayers, itemsPerPage = 6 }) {
               className="grid grid-cols-2 gap-x-10 gap-y-3 w-full"
             >
               {paginatedQueue.map((p, i) => {
-                const absoluteIndex = i + currentPage * itemsPerPage
+                const absoluteIndex = i + activePage * itemsPerPage
                 return (
                   <motion.div layout key={p.queueDocId || p.playerId} className="flex items-start gap-3 py-0.5">
                     <span className="text-[11px] font-mono text-on-surface-variant mt-0.5 w-7 shrink-0">
@@ -152,12 +146,12 @@ export function Queue({ standby, queue, allPlayers, itemsPerPage = 6 }) {
           totalPages <= 1 && 'invisible'
         )}>
           <span className="text-[11px] font-medium text-on-surface-variant">
-            Page {currentPage + 1} of {totalPages}
+            {activePage + 1} of {totalPages}
           </span>
           <div className="flex gap-2">
             <button
               onClick={prevPage}
-              disabled={currentPage === 0}
+              disabled={activePage === 0}
               className="p-1.5 rounded-md hover:bg-on-surface/10 active:bg-on-surface/20 disabled:opacity-30 transition-all text-on-surface-variant"
             >
               <ChevronLeft size={16} />

@@ -42,9 +42,6 @@ export function PlayerList({ players, queue, queueSet, inMatchSet, onPlayerClick
         name: player.name,
         check_in_time: Date.now() / 1000,
         requested_teammate: null,
-        requested_opponent1: null,
-        requested_opponent2: null,
-        unranked_flag: false,
       })
       await updateDoc(doc(db, 'players', player.id), { is_in_queue: true })
       showToast(`${player.name} checked in`, 'success')
@@ -89,7 +86,6 @@ export function PlayerList({ players, queue, queueSet, inMatchSet, onPlayerClick
       </div>
 
       <div className="w-full flex flex-col flex-1">
-        {/* Table header */}
         <div className="grid grid-cols-[2fr_1.2fr_0.8fr_1fr] border-b border-outline-variant pb-3 mb-1 text-[10px] font-bold tracking-widest text-on-surface-variant uppercase">
           <div>Name</div>
           <div className="text-center">Tier</div>
@@ -118,22 +114,18 @@ export function PlayerList({ players, queue, queueSet, inMatchSet, onPlayerClick
                     onClick={() => onPlayerClick(p)}
                     className="grid grid-cols-[2fr_1.2fr_0.8fr_1fr] items-center py-2.5 border-b border-outline-variant last:border-0 hover:bg-surface-low/50 transition-colors -mx-4 px-4 overflow-hidden cursor-pointer"
                   >
-                    {/* Name column — no dot here */}
                     <div className="pr-2">
                       <span className="text-[13px] font-semibold truncate block">{p.name}</span>
                     </div>
 
-                    {/* Tier column — dot only, centred */}
                     <div className="flex items-center justify-center">
                       <span className={cn('w-2 h-2 rounded-full flex-shrink-0', TIER_BG[p.tier])} />
                     </div>
 
-                    {/* Rating column */}
                     <div className="text-[12px] font-mono text-center tracking-wide text-on-surface-variant whitespace-nowrap">
                       {p.rating}
                     </div>
 
-                    {/* Action column */}
                     <div className="flex justify-end">
                       {isPlaying ? (
                         <span className="h-6 px-3 flex items-center whitespace-nowrap rounded-sm text-[8px] font-bold tracking-wider uppercase bg-skill-advanced/20 text-skill-advanced border border-skill-advanced/30">
