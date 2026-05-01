@@ -7,8 +7,10 @@ trueskill.setup(env=env)
 
 SPREAD_THRESHOLD = 10.0
 STARVATION_RELAX_PER_MIN = 0.25
+MAX_COURTS = 4
 
 def _all_team_splits(lobby):
+    """generates all possible 2v2 team combinations for a 4-player lobby"""
     indices = [0, 1, 2, 3]
     seen = set()
     for pair in itertools.combinations(indices, 2):
@@ -19,6 +21,7 @@ def _all_team_splits(lobby):
             yield [lobby[pair[0]], lobby[pair[1]]], [lobby[complement[0]], lobby[complement[1]]]
 
 def _requests_satisfied(team_a, team_b):
+    """checks if teammate requests are honored for both teams"""
     team_a_ids = {p["player_doc_id"] for p in team_a}
     team_b_ids = {p["player_doc_id"] for p in team_b}
     for team, opp_ids in [(team_a, team_b_ids), (team_b, team_a_ids)]:
@@ -30,6 +33,7 @@ def _requests_satisfied(team_a, team_b):
     return True
 
 def _check_requests(lobby):
+    """checks if requested teammates are present in the same lobby"""
     lobby_ids = {p["player_doc_id"] for p in lobby}
     for p in lobby:
         req_tm = p.get("requested_teammate")
@@ -38,10 +42,12 @@ def _check_requests(lobby):
     return True
 
 def _lobby_spread(lobby):
+    """returns the skill gap between the highest and lowest rated player"""
     mus = [p["mu"] for p in lobby]
     return max(mus) - min(mus)
 
 def _best_split(lobby):
+    """finds the most balanced 2v2 split for a lobby based on trueskill and teammate requests"""
     best_score = -float("inf")
     best_a = best_b = None
     best_quality = 0.0
@@ -79,7 +85,7 @@ def _best_split(lobby):
     return best_a, best_b, max(0.0, best_quality), best_delta, best_disparity
 
 def _score_lobby(lobby):
-    """calculates a heuristic score for a lobby using trueskill and a penalty for unequal partner skill disparity"""
+    """calculates a heuristic match score, penalizing internal team skill gaps and total lobby spread"""
     if not _check_requests(lobby):
         return None
         
@@ -105,6 +111,7 @@ def _score_lobby(lobby):
     }
 
 def _find_fairest_fallback(pool):
+    """finds the best possible match from the current pool when standard criteria aren't met"""
     best_fallback = None
     best_fallback_score = -float('inf')
     
@@ -121,7 +128,7 @@ def _find_fairest_fallback(pool):
     return best_fallback
 
 def _find_match_queue_traversal(pool, in_progress_players):
-    """iterates through the queue to find the best match for each player, skipping anyone who is stalling for a better game"""
+    """scans the queue for the best immediate match while weighing future potential games"""
     now = time.time()
     stalling_players = set()
     
@@ -192,21 +199,21 @@ def _find_match_queue_traversal(pool, in_progress_players):
     return global_best_match
 
 def find_best_matches(state):
-    """core logic to figure out who plays next based on trueskill spread, wait time, and available courts"""
+    """orchestrates matchmaking by checking standby slots, active courts, and player counts"""
     queue = state["queue"]
     in_progress_players = state["in_progress_players"]
     active_matches = state["active_matches"]
-    num_courts = state.get("num_courts", 4)
     
     occupied_courts = {m["court_number"] for m in active_matches if m.get("court_number")}
-    free_courts = [c for c in range(1, num_courts + 1) if c not in occupied_courts]
+    free_courts = [c for c in range(1, MAX_COURTS + 1) if c not in occupied_courts]
     
     standby_matches = [m for m in active_matches if m.get("status") == "standby"]
     
     matches_to_create = []
     available_pool = list(queue)
-    total_players_in_building = len(in_progress_players) + len(queue)
-    
+    total_players = len(in_progress_players) + len(queue)
+    required_active_courts = min(MAX_COURTS, total_players // 4)
+
     while free_courts and len(available_pool) >= 4:
         if standby_matches:
             standby = standby_matches.pop(0)
@@ -219,7 +226,7 @@ def find_best_matches(state):
             continue
 
         match = _find_match_queue_traversal(available_pool, in_progress_players)
-        
+
         if match:
             court_num = free_courts.pop(0)
             matches_to_create.append({
@@ -231,20 +238,23 @@ def find_best_matches(state):
             available_pool = [p for p in available_pool if p["player_doc_id"] not in matched_ids]
             in_progress_players.extend(match["team_a"] + match["team_b"])
         else:
-            match = _find_fairest_fallback(available_pool)
-            if match:
-                court_num = free_courts.pop(0)
-                matches_to_create.append({
-                    "type": "new_match",
-                    "court_number": court_num,
-                    "match_data": match
-                })
-                matched_ids = {p["player_doc_id"] for p in match["team_a"] + match["team_b"]}
-                available_pool = [p for p in available_pool if p["player_doc_id"] not in matched_ids]
-                in_progress_players.extend(match["team_a"] + match["team_b"])
+            projected_active_courts = MAX_COURTS - len(free_courts)
+            if projected_active_courts < required_active_courts:
+                match = _find_fairest_fallback(available_pool)
+                if match:
+                    court_num = free_courts.pop(0)
+                    matches_to_create.append({
+                        "type": "new_match",
+                        "court_number": court_num,
+                        "match_data": match
+                    })
+                    matched_ids = {p["player_doc_id"] for p in match["team_a"] + match["team_b"]}
+                    available_pool = [p for p in available_pool if p["player_doc_id"] not in matched_ids]
+                    in_progress_players.extend(match["team_a"] + match["team_b"])
+                else:
+                    break
             else:
-                break
-                
+                break                
     if not free_courts and not standby_matches and len(available_pool) >= 4:
         match = _find_match_queue_traversal(available_pool, in_progress_players)
         if match:

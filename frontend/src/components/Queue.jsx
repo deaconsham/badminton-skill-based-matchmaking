@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Card } from './ui/Card'
-import { ChevronLeft, ChevronRight, Clock } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Clock, Link } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '../lib/utils'
 import { TIER_BG, TIER_COLOUR } from '../lib/constants'
@@ -174,6 +174,12 @@ export function Queue({ standby, queue, allPlayers, itemsPerPage = 6 }) {
               <ChevronRight size={16} />
             </button>
           </div>
+        </div>
+      </Card>
+    </>
+  )
+}
+v>
         </div>
       </Card>
     </>

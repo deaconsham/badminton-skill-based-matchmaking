@@ -8,6 +8,7 @@ from matchmaker import find_best_matches
 DEBOUNCE_SECONDS = 5.0
 
 class Debouncer:
+    """thread-safe debouncer to prevent database spam during rapid firestore events"""
     def __init__(self, delay, callback):
         self.delay = delay
         self.callback = callback
@@ -15,6 +16,7 @@ class Debouncer:
         self._lock = threading.Lock()
 
     def trigger(self):
+        """starts or resets the timer to execute the callback after the specified delay"""
         with self._lock:
             if self.timer is not None:
                 self.timer.cancel()
@@ -22,7 +24,7 @@ class Debouncer:
             self.timer.start()
 
 def run_matchmaking_cycle():
-    """the main loop that grabs the state, crunches the numbers, and pushes new matches to the database"""
+    """runs the full matchmaking loop: handles finishes, fetches state, and creates new matches"""
     try:
         print("running matchmaking cycle")
         process_finished_matches()
@@ -50,17 +52,19 @@ def run_matchmaking_cycle():
         traceback.print_exc()
 
 def main():
-    """sets up the firebase listeners and the debouncer so we don't spam the database"""
+    """entry point: sets up firestore real-time lis teners and starts the event loop"""
     print("initializing event-driven matchmaking engine")
     
     debouncer = Debouncer(DEBOUNCE_SECONDS, run_matchmaking_cycle)
     
     def on_snapshot_callback(col_snapshot, changes, read_time):
+        """Standard callback for collection-level snapshot events."""
         print(f"received snapshot event ({len(changes)} changes). debouncing")
         debouncer.trigger()
 
     def on_settings_snapshot(doc_snapshot, changes, read_time):
-        print("received settings snapshot event. debouncing")
+        """standard callback for settings document changes"""
+        print("received settings snapshot event")
         debouncer.trigger()
 
     queue_watch = db.collection("queue").on_snapshot(on_snapshot_callback)

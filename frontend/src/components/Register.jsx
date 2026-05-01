@@ -9,12 +9,17 @@ import { db } from '../lib/firebase'
 import { TIERS, TIER_BG, STARTING_MU } from '../lib/constants'
 import { useToast } from './ui/ToastProvider'
 
+/**
+ * Handles adding new players to the system. 
+ * Allows setting an initial skill tier which determines their starting TrueSkill mu.
+ */
 export function Register() {
   const { showToast } = useToast()
   const [name, setName] = useState('')
   const [selectedTier, setSelectedTier] = useState('Beginner')
   const [submitting, setSubmitting] = useState(false)
 
+  // Validates and saves the new player document to Firestore
   const handleSubmit = async () => {
     const trimmed = name.trim()
     if (!trimmed) {

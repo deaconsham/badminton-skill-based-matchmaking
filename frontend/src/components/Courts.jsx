@@ -7,6 +7,7 @@ import { doc, updateDoc, writeBatch } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { useToast } from './ui/ToastProvider'
 
+/** Simple helper for display time since match start */
 function formatElapsed(startedAt) {
   if (!startedAt) return '0m'
   const seconds = Math.floor(Date.now() / 1000 - startedAt)
@@ -14,6 +15,7 @@ function formatElapsed(startedAt) {
   return `${Math.floor(seconds / 60)}m`
 }
 
+/** Individual player list item within a court card */
 function PlayerRow({ name, rating, tier }) {
   return (
     <div className="flex items-center justify-between py-1">
@@ -28,11 +30,14 @@ function PlayerRow({ name, rating, tier }) {
   )
 }
 
+/** 
+ * Handles match scoring and voiding for a single court.
+ * Local tick ensures the 'elapsed' timer stays fresh.
+ */
 function CourtCard({ court, allPlayers }) {
   const { showToast } = useToast()
   const [, setTick] = useState(0)
   const [submitting, setSubmitting] = useState(null)
-
   const [confirmVoid, setConfirmVoid] = useState(false)
 
   useEffect(() => {
@@ -40,6 +45,7 @@ function CourtCard({ court, allPlayers }) {
     return () => clearInterval(interval)
   }, [])
 
+  /** Maps IDs back to full player objects for rendering */
   const resolvePlayer = (id, fallbackName) => {
     if (!allPlayers) return { name: fallbackName || '?', tier: 'Beginner', rating: 0 }
     const p = allPlayers.find((pl) => pl.id === id)
@@ -51,6 +57,7 @@ function CourtCard({ court, allPlayers }) {
   const teamA = court.teamA.map((id, i) => resolvePlayer(id, court.teamANames?.[i]))
   const teamB = court.teamB.map((id, i) => resolvePlayer(id, court.teamBNames?.[i]))
 
+  /** Marks match as done in DB which triggers the rating engine */
   const handleWin = async (winner) => {
     setSubmitting(winner)
     try {
@@ -63,6 +70,7 @@ function CourtCard({ court, allPlayers }) {
     setSubmitting(null)
   }
 
+  /** Cancels match and resets player states so they aren't stuck 'in game' */
   const handleVoid = async () => {
     setSubmitting('void')
     try {
@@ -165,6 +173,10 @@ function CourtCard({ court, allPlayers }) {
   )
 }
 
+/** 
+ * Visualizes the 4 physical courts and their current occupancy.
+ * Includes a legend for the skill tier rating ranges.
+ */
 export function Courts({ courts, allPlayers }) {
   const courtSlots = [1, 2, 3, 4].map((num) => ({
     courtNumber: num,
@@ -175,7 +187,6 @@ export function Courts({ courts, allPlayers }) {
     <Card className="p-6 flex flex-col gap-5 h-full">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">Active Courts</h2>
-        {/* Rating range legend using shared constants */}
         <div className="flex items-center gap-3">
           {TIERS.map((tier) => {
             const [low, high] = RATING_RANGES[tier]
