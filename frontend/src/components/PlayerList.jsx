@@ -9,10 +9,6 @@ import { db } from '../lib/firebase'
 import { TIER_BG } from '../lib/constants'
 import { useToast } from './ui/ToastProvider'
 
-/**
- * Browsable list of all registered players. 
- * Allows searching, pagination, and checking players into/out of the queue.
- */
 export function PlayerList({ players, queue, queueSet, inMatchSet, onPlayerClick }) {
   const { showToast } = useToast()
   const [currentPage, setCurrentPage] = useState(0)
@@ -20,16 +16,19 @@ export function PlayerList({ players, queue, queueSet, inMatchSet, onPlayerClick
   const [loadingId, setLoadingId] = useState(null)
   const itemsPerPage = 10
 
-  // Filter based on search input
   const filtered = players.filter((p) =>
     p.name.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
-  // Sort: Queue status first, then by rating
   const sorted = [...filtered].sort((a, b) => {
-    const aIn = queueSet.has(a.id) ? 1 : 0
-    const bIn = queueSet.has(b.id) ? 1 : 0
-    if (aIn !== bIn) return bIn - aIn
+    const aPlaying = inMatchSet.has(a.id) ? 1 : 0
+    const bPlaying = inMatchSet.has(b.id) ? 1 : 0
+    if (aPlaying !== bPlaying) return bPlaying - aPlaying
+
+    const aInQueue = queueSet.has(a.id) ? 1 : 0
+    const bInQueue = queueSet.has(b.id) ? 1 : 0
+    if (aInQueue !== bInQueue) return bInQueue - aInQueue
+
     return b.rating - a.rating
   })
 
@@ -40,7 +39,6 @@ export function PlayerList({ players, queue, queueSet, inMatchSet, onPlayerClick
   const nextPage = () => setCurrentPage((p) => Math.min(totalPages - 1, p + 1))
   const prevPage = () => setCurrentPage((p) => Math.max(0, p - 1))
 
-  /** Moves a player document from roster to queue */
   const handleCheckIn = async (player) => {
     setLoadingId(player.id)
     try {
@@ -59,7 +57,6 @@ export function PlayerList({ players, queue, queueSet, inMatchSet, onPlayerClick
     setLoadingId(null)
   }
 
-  /** Removes player from the queue collection */
   const handleCheckOut = async (player) => {
     const entry = queue.find((q) => q.playerId === player.id)
     if (!entry) return

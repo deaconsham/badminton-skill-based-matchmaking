@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react'
 import { Card } from './ui/Card'
-import { ChevronLeft, ChevronRight, Clock, Link } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Clock, Link, Trash2 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '../lib/utils'
 import { TIER_BG, TIER_COLOUR } from '../lib/constants'
+import { writeBatch, doc } from 'firebase/firestore'
+import { db } from '../lib/firebase'
+import { useToast } from './ui/ToastProvider'
 
 function formatWait(checkInTime) {
   const seconds = Math.floor(Date.now() / 1000 - checkInTime)
@@ -19,6 +22,9 @@ function TierDot({ tier }) {
 }
 
 export function Queue({ standby, queue, allPlayers, itemsPerPage = 6 }) {
+  const { showToast } = useToast()
+  const [confirmVoid, setConfirmVoid] = useState(false)
+  const [submitting, setSubmitting] = useState(null)
   const [currentPage, setCurrentPage] = useState(0)
   const [, setTick] = useState(0)
   const totalPages = Math.max(1, Math.ceil(queue.length / itemsPerPage))
@@ -29,6 +35,34 @@ export function Queue({ standby, queue, allPlayers, itemsPerPage = 6 }) {
     const interval = setInterval(() => setTick((t) => t + 1), 60000)
     return () => clearInterval(interval)
   }, [])
+
+  useEffect(() => {
+    if (totalPages <= 1) return
+    const scrollInterval = setInterval(() => {
+      setCurrentPage((p) => (p + 1) % totalPages)
+    }, 5000)
+    return () => clearInterval(scrollInterval)
+  }, [totalPages])
+
+  const handleVoid = async () => {
+    if (!standby) return
+    setSubmitting('void')
+    try {
+      const batch = writeBatch(db)
+      batch.update(doc(db, 'matches', standby.id), { status: 'voided' })
+      const playersInMatch = [...(standby.teamA || []), ...(standby.teamB || [])]
+      playersInMatch.forEach(pid => {
+        batch.update(doc(db, 'players', pid), { is_in_standby: false })
+      })
+      await batch.commit()
+      showToast('Standby match voided (players checked out)', 'info')
+      setConfirmVoid(false)
+    } catch (err) {
+      console.error('Failed to void standby match:', err)
+      showToast('Failed to void match', 'warning')
+    }
+    setSubmitting(null)
+  }
 
   const paginatedQueue = queue.slice(activePage * itemsPerPage, (activePage + 1) * itemsPerPage)
   const nextPage = () => setCurrentPage((p) => Math.min(totalPages - 1, Math.max(0, Math.min(p, totalPages - 1)) + 1))
@@ -51,13 +85,44 @@ export function Queue({ standby, queue, allPlayers, itemsPerPage = 6 }) {
 
   return (
     <>
-      <Card className="p-5 flex flex-col h-[250px]">
+      <Card className="relative p-5 flex flex-col h-[250px]">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-[13px] font-bold tracking-widest uppercase text-on-surface-variant">Match Standby</h2>
-          {standby?.unranked && (
-            <span className="text-[8px] font-bold tracking-widest uppercase px-2 py-1 rounded-sm bg-skill-orange/15 text-skill-orange">
-              Unranked
-            </span>
+          <div className="flex items-center gap-2">
+            <h2 className="text-[13px] font-bold tracking-widest uppercase text-on-surface-variant">Match Standby</h2>
+            {standby?.unranked && (
+              <span className="text-[8px] font-bold tracking-widest uppercase px-2 py-1 rounded-sm bg-skill-orange/15 text-skill-orange">
+                Unranked
+              </span>
+            )}
+          </div>
+          {standby && (
+            !confirmVoid ? (
+              <button
+                onClick={() => setConfirmVoid(true)}
+                disabled={submitting !== null}
+                className="p-1.5 rounded-md hover:bg-skill-beginner/10 transition-colors text-on-surface-variant hover:text-skill-beginner disabled:opacity-50"
+                title="Void Standby Match"
+              >
+                <Trash2 size={14} />
+              </button>
+            ) : (
+              <div className="flex items-center gap-1.5 bg-surface-lowest px-2 py-1 rounded-md border border-skill-beginner/20 z-10 transition-all shadow-lg absolute right-10">
+                <span className="text-[9px] font-bold text-skill-beginner uppercase tracking-wider pr-1">Are you sure?</span>
+                <button
+                  onClick={handleVoid}
+                  disabled={submitting !== null}
+                  className="px-2 py-1 rounded-[4px] text-[8px] font-bold tracking-wider uppercase bg-skill-beginner text-white hover:bg-skill-beginner/90 transition-all disabled:opacity-50"
+                >
+                  Void
+                </button>
+                <button
+                  onClick={() => setConfirmVoid(false)}
+                  className="px-2 py-1 rounded-[4px] text-[8px] font-bold tracking-wider uppercase bg-surface-highest text-on-surface hover:bg-surface-highest/80 transition-all"
+                >
+                  Cancel
+                </button>
+              </div>
+            )
           )}
         </div>
 
@@ -174,12 +239,6 @@ export function Queue({ standby, queue, allPlayers, itemsPerPage = 6 }) {
               <ChevronRight size={16} />
             </button>
           </div>
-        </div>
-      </Card>
-    </>
-  )
-}
-v>
         </div>
       </Card>
     </>

@@ -7,10 +7,6 @@ import { cn } from '../lib/utils'
 import { TIER_BG, TIER_COLOUR, TIERS } from '../lib/constants'
 import { useToast } from './ui/ToastProvider'
 
-/**
- * Detailed player profile modal.
- * Shows career stats and allows queuing players with specific teammate requests.
- */
 export function PlayerModel({ player, allPlayers, queue, queueSet, onClose }) {
   const { showToast } = useToast()
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -36,10 +32,6 @@ export function PlayerModel({ player, allPlayers, queue, queueSet, onClose }) {
     requested_teammate: 'requestedTeammate',
   }
 
-  /**
-   * Updates teammate requests in the queue collection.
-   * Handles reciprocity: if A requests B, it clears B's old requests to ensure a pair.
-   */
   const handleRequestChange = async (field, value) => {
     if (!queueEntry) return
     setSaving(true)
@@ -82,7 +74,6 @@ export function PlayerModel({ player, allPlayers, queue, queueSet, onClose }) {
     setSaving(false)
   }
 
-  /** Permanently deletes the player from the database */
   const handleDelete = async () => {
     setDeleting(true)
     try {
@@ -214,7 +205,6 @@ export function PlayerModel({ player, allPlayers, queue, queueSet, onClose }) {
   )
 }
 
-/** Simple reusable stat display component */
 function StatBox({ label, value }) {
   return (
     <div className="bg-surface-low rounded-md p-3 flex flex-col gap-1">

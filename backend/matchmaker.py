@@ -7,7 +7,7 @@ trueskill.setup(env=env)
 
 SPREAD_THRESHOLD = 10.0
 STARVATION_RELAX_PER_MIN = 0.25
-MAX_COURTS = 4
+MAX_COURTS = 3
 
 def _all_team_splits(lobby):
     """generates all possible 2v2 team combinations for a 4-player lobby"""
