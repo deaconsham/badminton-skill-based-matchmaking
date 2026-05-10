@@ -47,5 +47,4 @@ The backend is a Python script that listens to Firestore events.
 The matchmaking logic lives in `backend/matchmaker.py`. It uses a heuristic score to balance match quality, skill gaps within teams, and player wait times.
 
 ## References
-**TrueSkill™ Paper:** [TrueSkill™: A Bayesian Skill Rating System](https://www.microsoft.comen-us/research/publication/trueskill-tm-a-bayesian-skill-rating-system/) (Herbrich, R., Minka, T., and Graepel, T.)
-**Project Website:** [Microsoft Research - TrueSkill Ranking System](https://www.microsoft.com/en-us/research/project/trueskill-ranking-system/)
+**TrueSkill™:** [TrueSkill™: A Bayesian Skill Rating System](https://www.microsoft.comen-us/research/publication/trueskill-tm-a-bayesian-skill-rating-system/) (Herbrich, R., Minka, T., and Graepel, T.)
