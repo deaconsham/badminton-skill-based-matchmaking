@@ -109,7 +109,7 @@ function Dashboard() {
   return (
     <div className="min-h-screen p-6 md:p-8 max-w-[1600px] mx-auto flex flex-col gap-6">
       <header className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold tracking-tight">Fuel Badminton Academy</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Badminton TrueSkill Matchmaking</h1>
         <div className="flex items-center gap-4">
           <span className="text-[11px] font-mono text-on-surface-variant">
             {players.length} players · {queue.length} in queue
